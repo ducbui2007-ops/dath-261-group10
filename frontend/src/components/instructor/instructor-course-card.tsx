@@ -10,20 +10,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import type { Course } from "@/types/course";
 
-export interface InstructorCourseCardData {
-  id: string;
-  title: string;
-  status: "Published" | "Draft";
-  studentCount: number;
-}
+export type InstructorCourseCardData = Pick<
+  Course,
+  "id" | "title" | "isPublished" | "enrollmentCount"
+>;
 
 interface InstructorCourseCardProps {
   course: InstructorCourseCardData;
 }
 
 export function InstructorCourseCard({ course }: InstructorCourseCardProps) {
-  const isPublished = course.status === "Published";
+  const isPublished = course.isPublished;
 
   return (
     <Card
@@ -38,7 +37,7 @@ export function InstructorCourseCard({ course }: InstructorCourseCardProps) {
             !isPublished && "text-muted-foreground"
           )}
         >
-          {course.status}
+          {isPublished ? "Published" : "Draft"}
         </Badge>
         <CardTitle className="instructor-course-card__title_01 font-display text-base font-bold leading-snug">
           {course.title}
@@ -50,7 +49,7 @@ export function InstructorCourseCard({ course }: InstructorCourseCardProps) {
           className="instructor-course-card__students-icon_01 h-4 w-4 shrink-0"
         />
         <span className="instructor-course-card__student-count_01">
-          {course.studentCount} students
+          {course.enrollmentCount} students
         </span>
       </CardContent>
       <CardFooter className="instructor-course-card__footer_01 px-4 pb-4 pt-0 sm:px-5 sm:pb-5">

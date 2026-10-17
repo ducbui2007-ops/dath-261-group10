@@ -9,20 +9,20 @@ const MOCK_COURSES: InstructorCourseCardData[] = [
   {
     id: "data-structures-and-algorithms",
     title: "Data Structures and Algorithms",
-    status: "Published",
-    studentCount: 128,
+    isPublished: true,
+    enrollmentCount: 128,
   },
   {
     id: "software-engineering",
     title: "Software Engineering",
-    status: "Draft",
-    studentCount: 42,
+    isPublished: false,
+    enrollmentCount: 42,
   },
   {
     id: "computer-networks",
     title: "Computer Networks",
-    status: "Published",
-    studentCount: 96,
+    isPublished: true,
+    enrollmentCount: 96,
   },
 ];
 
