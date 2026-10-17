@@ -1,30 +1,8 @@
+import Link from "next/link";
 import { InstructorQuickActions } from "@/components/instructor/instructor-quick-actions";
-import {
-  InstructorCourseCard,
-  type InstructorCourseCardData,
-} from "@/components/instructor/instructor-course-card";
+import { InstructorCourseCard } from "@/components/instructor/instructor-course-card";
 import { InstructorGettingStarted } from "@/components/instructor/instructor-getting-started";
-
-const MOCK_COURSES: InstructorCourseCardData[] = [
-  {
-    id: "data-structures-and-algorithms",
-    title: "Data Structures and Algorithms",
-    isPublished: true,
-    enrollmentCount: 128,
-  },
-  {
-    id: "software-engineering",
-    title: "Software Engineering",
-    isPublished: false,
-    enrollmentCount: 42,
-  },
-  {
-    id: "computer-networks",
-    title: "Computer Networks",
-    isPublished: true,
-    enrollmentCount: 96,
-  },
-];
+import { MOCK_INSTRUCTOR_COURSES } from "@/lib/mock-instructor-courses";
 
 export default function InstructorHomePage() {
   return (
@@ -62,11 +40,17 @@ export default function InstructorHomePage() {
               Your Courses
             </h2>
             <span className="instructor-home__course-count_01 text-xs text-muted-foreground">
-              {MOCK_COURSES.length} courses
+              {MOCK_INSTRUCTOR_COURSES.length} courses
             </span>
+            <Link
+              href="/instructor/courses"
+              className="instructor-home__view-all_01 ml-auto rounded-lg text-xs font-bold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              View All Courses
+            </Link>
           </div>
           <div className="instructor-home__course-grid_01 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {MOCK_COURSES.map((course) => (
+            {MOCK_INSTRUCTOR_COURSES.map((course) => (
               <InstructorCourseCard key={course.id} course={course} />
             ))}
           </div>
