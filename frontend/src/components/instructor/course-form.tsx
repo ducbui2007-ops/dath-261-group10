@@ -31,10 +31,10 @@ export type CourseFormValues = Pick<
 
 type CourseFormProps = { initialValues: CourseFormValues } & (
   | { mode: "create" }
-  | { mode: "edit"; courseId: string; initialChapters: Course["chapters"] }
+  | { mode: "edit"; courseId: string; initialChapters: Course["chapters"]; initialIsPublished: Course["isPublished"] }
 );
 type FormErrors = Partial<Record<keyof CourseFormValues, string>>;
-type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts };
+type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts; isPublished?: Course["isPublished"] };
 
 const FIELDS = [
   ["title", "Course Title"],
@@ -74,9 +74,11 @@ function validate(values: CourseFormValues): FormErrors {
 export function CourseForm(props: CourseFormProps) {
   const { initialValues, mode } = props;
   const initialChapters = props.mode === "edit" ? props.initialChapters : [];
+  const initialIsPublished = props.mode === "edit" ? props.initialIsPublished : false;
   const initialMaterials = React.useMemo(() => hydrateMaterials(initialChapters), [initialChapters]);
   const router = useRouter();
   const [values, setValues] = React.useState<CourseFormValues>(() => ({ ...initialValues }));
+  const [isPublished, setIsPublished] = React.useState<Course["isPublished"]>(initialIsPublished);
   const [chapters, setChapters] = React.useState(() => cloneChapters(initialChapters));
   const [materials, setMaterials] = React.useState(() => hydrateMaterials(initialChapters));
   const [errors, setErrors] = React.useState<FormErrors>({});
@@ -93,7 +95,7 @@ export function CourseForm(props: CourseFormProps) {
   const resetButtonRef = React.useRef<HTMLButtonElement>(null);
   const allowLeaveRef = React.useRef(false);
   const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]) ||
-    (mode === "edit" && (JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
+    (mode === "edit" && (isPublished !== initialIsPublished || JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
       !materialDraftsEqual(materials, initialMaterials)));
 
   React.useEffect(() => setIsReady(true), []);
@@ -169,6 +171,7 @@ export function CourseForm(props: CourseFormProps) {
 
   const reset = () => {
     setValues({ ...initialValues });
+    setIsPublished(initialIsPublished);
     setChapters(cloneChapters(initialChapters));
     setMaterials(hydrateMaterials(initialChapters));
     setErrors({});
@@ -214,6 +217,7 @@ export function CourseForm(props: CourseFormProps) {
       return;
     }
     setPreview({ ...values, ...(mode === "edit" ? {
+      isPublished,
       chapters: cloneChapters(chapters),
       materials: Object.fromEntries(Object.entries(materials).map(([id, material]) => [id, { ...material }])),
     } : {}) });
@@ -279,6 +283,30 @@ export function CourseForm(props: CourseFormProps) {
                 })}
               </div>
               {mode === "edit" && (
+                <section aria-labelledby="course-publication-title" className="course-form__publication_01 space-y-3 rounded-[15px] border border-border p-4">
+                  <div className="course-form__publication-heading_01 flex flex-wrap items-center justify-between gap-2">
+                    <h2 id="course-publication-title" className="course-form__publication-title_01 font-display text-lg font-bold">Publication Status</h2>
+                    <Badge variant="outline" className={cn("course-form__publication-status_01 whitespace-nowrap", isPublished
+                      ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "border-red-600/20 bg-red-500/10 text-red-700 dark:text-red-300")}>{isPublished ? "Published" : "Draft"}</Badge>
+                  </div>
+                  <label htmlFor="course-is-published" className="course-form__publication-toggle_01 flex w-fit cursor-pointer items-center gap-3">
+                    <input id="course-is-published" type="checkbox" role="switch" checked={isPublished} disabled={!isReady}
+                      aria-describedby="course-publication-notice"
+                      onChange={(event) => {
+                        allowLeaveRef.current = false;
+                        setIsPublished(event.target.checked);
+                        setPreview(null);
+                      }} className="course-form__publication-input_01 peer sr-only" />
+                    <span aria-hidden="true" className="course-form__publication-track_01 inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-border bg-muted p-0.5 transition-colors peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-disabled:opacity-50">
+                      <span className={cn("course-form__publication-thumb_01 block h-4 w-4 rounded-full bg-primary-foreground shadow-sm transition-transform", isPublished ? "translate-x-5" : "translate-x-0")} />
+                    </span>
+                    <span className="course-form__publication-label_01 text-sm font-medium">Publish this course</span>
+                  </label>
+                  <p id="course-publication-notice" className="course-form__publication-notice_01 text-xs text-muted-foreground">Preview only — status changes are not saved or applied to the course.</p>
+                </section>
+              )}
+              {mode === "edit" && (
                 <CurriculumBuilder
                   chapters={chapters}
                   materials={materials}
@@ -323,6 +351,16 @@ export function CourseForm(props: CourseFormProps) {
                     <dd className="course-form__preview-value_01 whitespace-pre-wrap break-words text-sm text-muted-foreground">{preview[name] || "Not provided"}</dd>
                   </div>
                 ))}
+                {typeof preview.isPublished === "boolean" && (
+                  <div className="course-form__preview-publication_01 space-y-1">
+                    <dt className="course-form__preview-label_01 text-sm font-medium">Publication Status</dt>
+                    <dd className="course-form__preview-value_01">
+                      <Badge variant="outline" className={cn("course-form__preview-status_01 whitespace-nowrap", preview.isPublished
+                        ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-red-600/20 bg-red-500/10 text-red-700 dark:text-red-300")}>{preview.isPublished ? "Published" : "Draft"}</Badge>
+                    </dd>
+                  </div>
+                )}
               </dl>
               {preview.chapters && (
                 <section className="course-form__curriculum-preview_01 mt-6 space-y-4" aria-labelledby="curriculum-preview-title">
