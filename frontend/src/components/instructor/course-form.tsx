@@ -7,6 +7,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  EMPTY_MATERIAL,
+  formatFileSize,
+  getMaterialContentUrl,
+  getMaterialType,
+  hasMaterialContent,
+  hydrateMaterials,
+  materialDraftsEqual,
+  pruneMaterials,
+  validateMaterial,
+  type MaterialDraft,
+  type MaterialDrafts,
+} from "@/lib/instructor-material";
 import { MOCK_INSTRUCTOR_COURSES } from "@/lib/mock-instructor-courses";
 import { cn } from "@/lib/utils";
 import type { Course } from "@/types/course";
@@ -21,7 +34,7 @@ type CourseFormProps = { initialValues: CourseFormValues } & (
   | { mode: "edit"; courseId: string; initialChapters: Course["chapters"] }
 );
 type FormErrors = Partial<Record<keyof CourseFormValues, string>>;
-type CoursePreview = CourseFormValues & { chapters?: Course["chapters"] };
+type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts };
 
 const FIELDS = [
   ["title", "Course Title"],
@@ -61,11 +74,14 @@ function validate(values: CourseFormValues): FormErrors {
 export function CourseForm(props: CourseFormProps) {
   const { initialValues, mode } = props;
   const initialChapters = props.mode === "edit" ? props.initialChapters : [];
+  const initialMaterials = React.useMemo(() => hydrateMaterials(initialChapters), [initialChapters]);
   const router = useRouter();
   const [values, setValues] = React.useState<CourseFormValues>(() => ({ ...initialValues }));
   const [chapters, setChapters] = React.useState(() => cloneChapters(initialChapters));
+  const [materials, setMaterials] = React.useState(() => hydrateMaterials(initialChapters));
   const [errors, setErrors] = React.useState<FormErrors>({});
   const [curriculumErrors, setCurriculumErrors] = React.useState<Record<string, string>>({});
+  const [materialErrors, setMaterialErrors] = React.useState<Record<string, string>>({});
   const [preview, setPreview] = React.useState<CoursePreview | null>(null);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const [isReady, setIsReady] = React.useState(false);
@@ -73,7 +89,8 @@ export function CourseForm(props: CourseFormProps) {
   const stayRef = React.useRef<HTMLButtonElement>(null);
   const allowLeaveRef = React.useRef(false);
   const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]) ||
-    (mode === "edit" && JSON.stringify(chapters) !== JSON.stringify(initialChapters));
+    (mode === "edit" && (JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
+      !materialDraftsEqual(materials, initialMaterials)));
 
   React.useEffect(() => setIsReady(true), []);
 
@@ -117,17 +134,40 @@ export function CourseForm(props: CourseFormProps) {
     };
   }, [isDirty, requestNavigation]);
 
+  const changeMaterial = (lessonId: string, material: MaterialDraft) => {
+    allowLeaveRef.current = false;
+    setMaterials((previous) => ({ ...previous, [lessonId]: material }));
+    const originalLesson = initialChapters.flatMap((chapter) => chapter.lessons).find((lesson) => lesson.id === lessonId);
+    setChapters((previous) => previous.map((chapter) => ({
+      ...chapter,
+      lessons: chapter.lessons.map((lesson) => lesson.id === lessonId ? {
+        ...lesson,
+        type: getMaterialType(material) ?? originalLesson?.type ?? "text",
+        contentUrl: getMaterialContentUrl(material),
+      } : lesson),
+    })));
+    setMaterialErrors((previous) => {
+      const next = { ...previous };
+      delete next[lessonId];
+      return next;
+    });
+    setPreview(null);
+  };
+
   const reset = () => {
     setValues({ ...initialValues });
     setChapters(cloneChapters(initialChapters));
+    setMaterials(hydrateMaterials(initialChapters));
     setErrors({});
     setCurriculumErrors({});
+    setMaterialErrors({});
     setPreview(null);
   };
   const review = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextErrors = validate(values);
     const nextCurriculumErrors: Record<string, string> = {};
+    const nextMaterialErrors: Record<string, string> = {};
     let invalidCurriculumField: string | undefined;
     if (mode === "edit") {
       for (const chapter of chapters) {
@@ -140,11 +180,17 @@ export function CourseForm(props: CourseFormProps) {
             nextCurriculumErrors[lesson.id] = "Enter a lesson title.";
             invalidCurriculumField ??= `curriculum-lesson-${lesson.id}`;
           }
+          const materialError = validateMaterial(materials[lesson.id] ?? EMPTY_MATERIAL);
+          if (materialError) {
+            nextMaterialErrors[lesson.id] = materialError;
+            invalidCurriculumField ??= `material-${lesson.id}`;
+          }
         }
       }
     }
     setErrors(nextErrors);
     setCurriculumErrors(nextCurriculumErrors);
+    setMaterialErrors(nextMaterialErrors);
     const invalidField = FIELDS.find(([name]) => nextErrors[name]);
     if (invalidField) {
       document.getElementById(`course-${invalidField[0]}`)?.focus();
@@ -154,7 +200,10 @@ export function CourseForm(props: CourseFormProps) {
       document.getElementById(invalidCurriculumField)?.focus();
       return;
     }
-    setPreview({ ...values, ...(mode === "edit" ? { chapters: cloneChapters(chapters) } : {}) });
+    setPreview({ ...values, ...(mode === "edit" ? {
+      chapters: cloneChapters(chapters),
+      materials: Object.fromEntries(Object.entries(materials).map(([id, material]) => [id, { ...material }])),
+    } : {}) });
   };
 
   return (
@@ -219,12 +268,17 @@ export function CourseForm(props: CourseFormProps) {
               {mode === "edit" && (
                 <CurriculumBuilder
                   chapters={chapters}
+                  materials={materials}
+                  onMaterialChange={changeMaterial}
                   errors={curriculumErrors}
+                  materialErrors={materialErrors}
                   disabled={!isReady}
                   onChange={(nextChapters) => {
                     allowLeaveRef.current = false;
                     setChapters(nextChapters);
+                    setMaterials((previous) => pruneMaterials(previous, nextChapters));
                     setCurriculumErrors({});
+                    setMaterialErrors({});
                     setPreview(null);
                   }}
                 />
@@ -268,12 +322,33 @@ export function CourseForm(props: CourseFormProps) {
                             <p className="course-form__empty_02 text-sm text-muted-foreground">No lessons added yet.</p>
                           ) : (
                             <ol className="course-form__preview-lessons_01 space-y-2 pl-4">
-                              {chapter.lessons.map((lesson) => (
-                                <li key={lesson.id} className="course-form__preview-lesson_01 flex flex-wrap items-center justify-between gap-2 text-sm">
-                                  <span className="course-form__lesson-title_01 min-w-0 break-words">{chapter.order}.{lesson.order} {lesson.title}</span>
-                                  <Badge variant="outline" className="course-form__lesson-type_01 capitalize">{lesson.type}</Badge>
-                                </li>
-                              ))}
+                              {chapter.lessons.map((lesson) => {
+                                const material = preview.materials?.[lesson.id] ?? EMPTY_MATERIAL;
+                                return (
+                                  <li key={lesson.id} className="course-form__preview-lesson_01 space-y-2 rounded-lg bg-muted/30 p-3 text-sm">
+                                    <div className="course-form__lesson-heading_01 flex flex-wrap items-center justify-between gap-2">
+                                      <span className="course-form__lesson-title_01 min-w-0 break-words">{chapter.order}.{lesson.order} {lesson.title}</span>
+                                      <Badge variant="outline" className="course-form__lesson-type_01 capitalize">{getMaterialType(material) ?? "Empty draft"}</Badge>
+                                    </div>
+                                    {!hasMaterialContent(material) ? (
+                                      <p className="course-form__material-empty_01 text-muted-foreground">No material attached. This lesson is a valid draft.</p>
+                                    ) : material.method === "upload" && material.file ? (
+                                      <div className="course-form__material-file_01 space-y-1">
+                                        <p className="course-form__material-name_01 break-all">{material.file.name}</p>
+                                        <p className="course-form__material-size_01 text-muted-foreground">{formatFileSize(material.file.size)} ({material.file.size.toLocaleString()} bytes)</p>
+                                        <Badge variant="outline" className="course-form__local-state_01">Selected locally — not uploaded</Badge>
+                                      </div>
+                                    ) : material.method === "url" ? (
+                                      <div className="course-form__material-url_01 space-y-1">
+                                        <a href={getMaterialContentUrl(material)} target="_blank" rel="noopener noreferrer" className="course-form__material-link_01 break-all text-primary underline">{material.url.trim()}</a>
+                                        <p className="course-form__material-notice_01 text-xs text-muted-foreground">Remote URL not verified.</p>
+                                      </div>
+                                    ) : material.method === "text" ? (
+                                      <p className="course-form__material-text_01 whitespace-pre-wrap break-words text-muted-foreground">{material.text}</p>
+                                    ) : null}
+                                  </li>
+                                );
+                              })}
                             </ol>
                           )}
                         </li>

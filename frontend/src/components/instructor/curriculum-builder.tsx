@@ -1,26 +1,28 @@
 "use client";
 
 import * as React from "react";
+import { MaterialUploader } from "@/components/instructor/material-uploader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { EMPTY_MATERIAL, hasMaterialContent, type MaterialDraft, type MaterialDrafts } from "@/lib/instructor-material";
 import { cn } from "@/lib/utils";
-import type { Chapter, Lesson, MaterialType } from "@/types/course";
+import type { Chapter, Lesson } from "@/types/course";
 
 interface CurriculumBuilderProps {
   chapters: Chapter[];
   onChange: (chapters: Chapter[]) => void;
+  materials: MaterialDrafts;
+  onMaterialChange: (lessonId: string, material: MaterialDraft) => void;
   errors?: Record<string, string>;
+  materialErrors?: Record<string, string>;
   disabled?: boolean;
 }
 
-const MATERIAL_TYPES: { value: MaterialType; label: string }[] = [
-  { value: "video", label: "Video" },
-  { value: "text", label: "Text" },
-  { value: "slide", label: "Slide" },
-  { value: "file", label: "File" },
-];
+type PendingDeletion =
+  | { kind: "chapter"; chapterId: string }
+  | { kind: "lesson"; chapterId: string; lessonId: string };
 
 // Frontend convention only: sibling order follows array position, starting at 1.
 function normalizeOrder(chapters: Chapter[]): Chapter[] {
@@ -39,21 +41,24 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
   return result;
 }
 
-export function CurriculumBuilder({ chapters, onChange, errors = {}, disabled = false }: CurriculumBuilderProps) {
-  const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null);
+export function CurriculumBuilder({ chapters, onChange, materials, onMaterialChange, errors = {}, materialErrors = {}, disabled = false }: CurriculumBuilderProps) {
+  const [pendingDeletion, setPendingDeletion] = React.useState<PendingDeletion | null>(null);
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
   const addChapterRef = React.useRef<HTMLButtonElement>(null);
-  const pendingChapter = chapters.find((chapter) => chapter.id === pendingDeleteId);
+  const pendingChapter = chapters.find((chapter) => chapter.id === pendingDeletion?.chapterId);
+  const pendingLesson = pendingDeletion?.kind === "lesson"
+    ? pendingChapter?.lessons.find((lesson) => lesson.id === pendingDeletion.lessonId)
+    : undefined;
 
   React.useEffect(() => {
-    if (pendingDeleteId) {
+    if (pendingDeletion) {
       dialogRef.current?.showModal();
       cancelRef.current?.focus();
     } else {
       dialogRef.current?.close();
     }
-  }, [pendingDeleteId]);
+  }, [pendingDeletion]);
 
   const updateChapter = (id: string, patch: Partial<Chapter>) => {
     onChange(chapters.map((chapter) => chapter.id === id ? { ...chapter, ...patch } : chapter));
@@ -68,11 +73,19 @@ export function CurriculumBuilder({ chapters, onChange, errors = {}, disabled = 
     changeStructure([...chapters, { id: crypto.randomUUID(), title: "", order: chapters.length + 1, lessons: [] }]);
   };
   const removeChapter = (chapter: Chapter) => {
-    if (chapter.lessons.length) setPendingDeleteId(chapter.id);
+    if (chapter.lessons.length) setPendingDeletion({ kind: "chapter", chapterId: chapter.id });
     else changeStructure(chapters.filter((item) => item.id !== chapter.id));
   };
   const changeLessons = (chapter: Chapter, lessons: Lesson[]) => {
     changeStructure(chapters.map((item) => item.id === chapter.id ? { ...item, lessons } : item));
+  };
+  const removeLesson = (chapter: Chapter, lesson: Lesson) => {
+    const material = materials[lesson.id] ?? EMPTY_MATERIAL;
+    if (lesson.title.trim() || lesson.contentUrl?.trim() || hasMaterialContent(material)) {
+      setPendingDeletion({ kind: "lesson", chapterId: chapter.id, lessonId: lesson.id });
+    } else {
+      changeLessons(chapter, chapter.lessons.filter((item) => item.id !== lesson.id));
+    }
   };
   const addLesson = (chapter: Chapter) => {
     changeLessons(chapter, [...chapter.lessons, {
@@ -133,7 +146,7 @@ export function CurriculumBuilder({ chapters, onChange, errors = {}, disabled = 
                     {chapter.lessons.map((lesson, lessonIndex) => (
                       <li key={lesson.id} className="curriculum-builder__lesson_01 space-y-3 rounded-lg bg-muted/30 p-4">
                         <h4 className="curriculum-builder__lesson-label_01 font-display text-sm font-bold">Lesson {chapterIndex + 1}.{lessonIndex + 1}</h4>
-                        <div className="curriculum-builder__lesson-fields_01 grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                        <div className="curriculum-builder__lesson-fields_01 space-y-4">
                           <div className="curriculum-builder__lesson-field_01 space-y-2">
                             <label htmlFor={`curriculum-lesson-${lesson.id}`} className="curriculum-builder__label_01 block text-sm font-medium">Lesson Title</label>
                             <Input id={`curriculum-lesson-${lesson.id}`} value={lesson.title} disabled={disabled} required
@@ -143,14 +156,13 @@ export function CurriculumBuilder({ chapters, onChange, errors = {}, disabled = 
                               className={cn("curriculum-builder__lesson-input_01", errors[lesson.id] && "border-destructive")} />
                             {errors[lesson.id] && <p id={`curriculum-lesson-${lesson.id}-error`} role="alert" className="curriculum-builder__error_01 text-sm text-destructive">{errors[lesson.id]}</p>}
                           </div>
-                          <div className="curriculum-builder__type-field_01 space-y-2">
-                            <label htmlFor={`curriculum-type-${lesson.id}`} className="curriculum-builder__label_01 block text-sm font-medium">Material Type</label>
-                            <select id={`curriculum-type-${lesson.id}`} value={lesson.type} disabled={disabled}
-                              onChange={(event) => updateLesson(chapter, lesson.id, { type: event.target.value as MaterialType })}
-                              className="curriculum-builder__type-select_01 h-11 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50">
-                              {MATERIAL_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-                            </select>
-                          </div>
+                          <MaterialUploader
+                            lessonId={lesson.id}
+                            value={materials[lesson.id] ?? EMPTY_MATERIAL}
+                            onChange={(material) => onMaterialChange(lesson.id, material)}
+                            error={materialErrors[lesson.id]}
+                            disabled={disabled}
+                          />
                         </div>
                         <div className="curriculum-builder__lesson-actions_01 flex flex-wrap gap-2">
                           <Button type="button" variant="outline" size="sm" disabled={disabled || lessonIndex === 0}
@@ -161,7 +173,7 @@ export function CurriculumBuilder({ chapters, onChange, errors = {}, disabled = 
                             onClick={() => changeLessons(chapter, moveItem(chapter.lessons, lessonIndex, 1))}>Move Down</Button>
                           <Button type="button" variant="destructive" size="sm" disabled={disabled}
                             aria-label={`Remove lesson ${chapterIndex + 1}.${lessonIndex + 1}`}
-                            onClick={() => changeLessons(chapter, chapter.lessons.filter((item) => item.id !== lesson.id))}>Remove Lesson</Button>
+                            onClick={() => removeLesson(chapter, lesson)}>Remove Lesson</Button>
                         </div>
                       </li>
                     ))}
@@ -175,20 +187,30 @@ export function CurriculumBuilder({ chapters, onChange, errors = {}, disabled = 
         )}
       </CardContent>
       <dialog ref={dialogRef} aria-labelledby="curriculum-delete-title" aria-describedby="curriculum-delete-message"
-        onCancel={() => setPendingDeleteId(null)}
+        onCancel={() => setPendingDeletion(null)}
         className="curriculum-builder__dialog_01 w-[calc(100%_-_2rem)] max-w-md rounded-[15px] border border-border bg-card p-6 text-card-foreground shadow-lg backdrop:bg-black/50">
-        <h2 id="curriculum-delete-title" className="curriculum-builder__dialog-title_01 font-display text-xl font-bold">Remove this chapter?</h2>
-        <p id="curriculum-delete-message" className="curriculum-builder__dialog-message_01 mt-3 text-sm text-muted-foreground">
-          Removing {pendingChapter?.title.trim() || "this chapter"} also removes all of its lessons from this curriculum.
+        <h2 id="curriculum-delete-title" className="curriculum-builder__dialog-title_01 font-display text-xl font-bold">
+          {pendingDeletion?.kind === "lesson" ? "Remove this lesson?" : "Remove this chapter?"}
+        </h2>
+        <p id="curriculum-delete-message" className="curriculum-builder__dialog-message_01 mt-3 break-words text-sm text-muted-foreground">
+          {pendingDeletion?.kind === "lesson"
+            ? `Removing ${pendingLesson?.title.trim() || "this lesson"} also discards its learning material from this curriculum.`
+            : `Removing ${pendingChapter?.title.trim() || "this chapter"} also discards all of its lessons and their learning materials from this curriculum.`}
         </p>
         <div className="curriculum-builder__dialog-actions_01 mt-6 flex flex-col gap-3 sm:flex-row">
-          <Button ref={cancelRef} type="button" variant="outline" onClick={() => setPendingDeleteId(null)}>Keep Chapter</Button>
+          <Button ref={cancelRef} type="button" variant="outline" onClick={() => setPendingDeletion(null)}>
+            {pendingDeletion?.kind === "lesson" ? "Keep Lesson" : "Keep Chapter"}
+          </Button>
           <Button type="button" variant="destructive" disabled={disabled} onClick={() => {
-            changeStructure(chapters.filter((chapter) => chapter.id !== pendingDeleteId));
+            if (pendingDeletion?.kind === "chapter") {
+              changeStructure(chapters.filter((chapter) => chapter.id !== pendingDeletion.chapterId));
+            } else if (pendingDeletion?.kind === "lesson" && pendingChapter) {
+              changeLessons(pendingChapter, pendingChapter.lessons.filter((lesson) => lesson.id !== pendingDeletion.lessonId));
+            }
             dialogRef.current?.close();
-            setPendingDeleteId(null);
+            setPendingDeletion(null);
             addChapterRef.current?.focus();
-          }}>Remove Chapter and Lessons</Button>
+          }}>{pendingDeletion?.kind === "lesson" ? "Remove Lesson" : "Remove Chapter and Lessons"}</Button>
         </div>
       </dialog>
     </Card>
