@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { EMPTY_MATERIAL, hasMaterialContent, type MaterialDraft, type MaterialDrafts } from "@/lib/instructor-material";
+import type { InstructorQuizDraft, QuizPlacement } from "@/lib/instructor-quiz";
 import { cn } from "@/lib/utils";
 import type { Chapter, Lesson } from "@/types/course";
 
@@ -15,6 +16,8 @@ interface CurriculumBuilderProps {
   onChange: (chapters: Chapter[]) => void;
   materials: MaterialDrafts;
   onMaterialChange: (lessonId: string, material: MaterialDraft) => void;
+  quizzes: InstructorQuizDraft[];
+  renderQuizzes: (placement: QuizPlacement) => React.ReactNode;
   errors?: Record<string, string>;
   materialErrors?: Record<string, string>;
   disabled?: boolean;
@@ -41,7 +44,7 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
   return result;
 }
 
-export function CurriculumBuilder({ chapters, onChange, materials, onMaterialChange, errors = {}, materialErrors = {}, disabled = false }: CurriculumBuilderProps) {
+export function CurriculumBuilder({ chapters, onChange, materials, onMaterialChange, quizzes, renderQuizzes, errors = {}, materialErrors = {}, disabled = false }: CurriculumBuilderProps) {
   const [pendingDeletion, setPendingDeletion] = React.useState<PendingDeletion | null>(null);
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
@@ -73,15 +76,17 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
     changeStructure([...chapters, { id: crypto.randomUUID(), title: "", order: chapters.length + 1, lessons: [] }]);
   };
   const removeChapter = (chapter: Chapter) => {
-    if (chapter.lessons.length) setPendingDeletion({ kind: "chapter", chapterId: chapter.id });
-    else changeStructure(chapters.filter((item) => item.id !== chapter.id));
+    if (chapter.title.trim() || chapter.lessons.length || quizzes.some((quiz) => quiz.placement.kind !== "course" && quiz.placement.chapterId === chapter.id)) {
+      setPendingDeletion({ kind: "chapter", chapterId: chapter.id });
+    } else changeStructure(chapters.filter((item) => item.id !== chapter.id));
   };
   const changeLessons = (chapter: Chapter, lessons: Lesson[]) => {
     changeStructure(chapters.map((item) => item.id === chapter.id ? { ...item, lessons } : item));
   };
   const removeLesson = (chapter: Chapter, lesson: Lesson) => {
     const material = materials[lesson.id] ?? EMPTY_MATERIAL;
-    if (lesson.title.trim() || lesson.contentUrl?.trim() || hasMaterialContent(material)) {
+    if (lesson.title.trim() || lesson.contentUrl?.trim() || hasMaterialContent(material) ||
+      quizzes.some((quiz) => quiz.placement.kind === "lesson" && quiz.placement.chapterId === chapter.id && quiz.placement.lessonId === lesson.id)) {
       setPendingDeletion({ kind: "lesson", chapterId: chapter.id, lessonId: lesson.id });
     } else {
       changeLessons(chapter, chapter.lessons.filter((item) => item.id !== lesson.id));
@@ -139,6 +144,7 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
                   <Button type="button" variant="destructive" size="sm" disabled={disabled}
                     aria-label={`Remove chapter ${chapterIndex + 1}`} onClick={() => removeChapter(chapter)}>Remove Chapter</Button>
                 </div>
+                {renderQuizzes({ kind: "chapter", chapterId: chapter.id })}
                 {chapter.lessons.length === 0 ? (
                   <p className="curriculum-builder__lessons-empty_01 text-sm text-muted-foreground">No lessons yet. Add the first lesson to this chapter.</p>
                 ) : (
@@ -164,6 +170,7 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
                             disabled={disabled}
                           />
                         </div>
+                        {renderQuizzes({ kind: "lesson", chapterId: chapter.id, lessonId: lesson.id })}
                         <div className="curriculum-builder__lesson-actions_01 flex flex-wrap gap-2">
                           <Button type="button" variant="outline" size="sm" disabled={disabled || lessonIndex === 0}
                             aria-label={`Move lesson ${chapterIndex + 1}.${lessonIndex + 1} up`}
@@ -194,8 +201,8 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
         </h2>
         <p id="curriculum-delete-message" className="curriculum-builder__dialog-message_01 mt-3 break-words text-sm text-muted-foreground">
           {pendingDeletion?.kind === "lesson"
-            ? `Removing ${pendingLesson?.title.trim() || "this lesson"} also discards its learning material from this curriculum.`
-            : `Removing ${pendingChapter?.title.trim() || "this chapter"} also discards all of its lessons and their learning materials from this curriculum.`}
+            ? `Removing ${pendingLesson?.title.trim() || "this lesson"} also discards its learning material and quizzes from this curriculum.`
+            : `Removing ${pendingChapter?.title.trim() || "this chapter"} also discards its lessons, their learning materials, and any quizzes in this chapter.`}
         </p>
         <div className="curriculum-builder__dialog-actions_01 mt-6 flex flex-col gap-3 sm:flex-row">
           <Button ref={cancelRef} type="button" variant="outline" onClick={() => setPendingDeletion(null)}>

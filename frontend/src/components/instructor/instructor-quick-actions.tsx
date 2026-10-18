@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const QUICK_ACTIONS = [
   { label: "Create Course", href: "/instructor/courses/create", icon: Plus },
-  { label: "Create Quiz", href: "/instructor/quizzes/create", icon: FilePlus2 },
+  { label: "Create Quiz", href: "/instructor/courses", icon: FilePlus2 },
   {
     label: "Review Submissions",
     href: "/instructor/submissions",

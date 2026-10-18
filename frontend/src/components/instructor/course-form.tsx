@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { CurriculumBuilder } from "@/components/instructor/curriculum-builder";
+import { QuizEditor } from "@/components/quiz/quiz-editor";
+import { QuizPlacementSection } from "@/components/quiz/quiz-placement-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -21,6 +23,7 @@ import {
   type MaterialDrafts,
 } from "@/lib/instructor-material";
 import { MOCK_INSTRUCTOR_COURSES } from "@/lib/mock-instructor-courses";
+import { cloneQuizDraft, createQuizDraft, describeQuizPlacement, pruneQuizDrafts, type InstructorQuizDraft, type QuizPlacement } from "@/lib/instructor-quiz";
 import { cn } from "@/lib/utils";
 import type { Course } from "@/types/course";
 
@@ -34,7 +37,7 @@ type CourseFormProps = { initialValues: CourseFormValues } & (
   | { mode: "edit"; courseId: string; initialChapters: Course["chapters"]; initialIsPublished: Course["isPublished"] }
 );
 type FormErrors = Partial<Record<keyof CourseFormValues, string>>;
-type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts; isPublished?: Course["isPublished"] };
+type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts; isPublished?: Course["isPublished"]; quizzes?: InstructorQuizDraft[] };
 
 const FIELDS = [
   ["title", "Course Title"],
@@ -81,6 +84,10 @@ export function CourseForm(props: CourseFormProps) {
   const [isPublished, setIsPublished] = React.useState<Course["isPublished"]>(initialIsPublished);
   const [chapters, setChapters] = React.useState(() => cloneChapters(initialChapters));
   const [materials, setMaterials] = React.useState(() => hydrateMaterials(initialChapters));
+  const [quizzes, setQuizzes] = React.useState<InstructorQuizDraft[]>([]);
+  const [editingQuiz, setEditingQuiz] = React.useState<InstructorQuizDraft | null>(null);
+  const [quizEditorDirty, setQuizEditorDirty] = React.useState(false);
+  const [pendingQuizRemoval, setPendingQuizRemoval] = React.useState<InstructorQuizDraft | null>(null);
   const [errors, setErrors] = React.useState<FormErrors>({});
   const [curriculumErrors, setCurriculumErrors] = React.useState<Record<string, string>>({});
   const [materialErrors, setMaterialErrors] = React.useState<Record<string, string>>({});
@@ -93,9 +100,12 @@ export function CourseForm(props: CourseFormProps) {
   const resetDialogRef = React.useRef<HTMLDialogElement>(null);
   const keepEditingRef = React.useRef<HTMLButtonElement>(null);
   const resetButtonRef = React.useRef<HTMLButtonElement>(null);
+  const quizTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const quizRemoveDialogRef = React.useRef<HTMLDialogElement>(null);
+  const keepQuizRef = React.useRef<HTMLButtonElement>(null);
   const allowLeaveRef = React.useRef(false);
   const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]) ||
-    (mode === "edit" && (isPublished !== initialIsPublished || JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
+    (mode === "edit" && (quizzes.length > 0 || quizEditorDirty || isPublished !== initialIsPublished || JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
       !materialDraftsEqual(materials, initialMaterials)));
 
   React.useEffect(() => setIsReady(true), []);
@@ -122,6 +132,15 @@ export function CourseForm(props: CourseFormProps) {
       resetDialogRef.current?.close();
     }
   }, [isResetPending]);
+
+  React.useEffect(() => {
+    if (pendingQuizRemoval) {
+      if (!quizRemoveDialogRef.current?.open) quizRemoveDialogRef.current?.showModal();
+      keepQuizRef.current?.focus();
+    } else {
+      quizRemoveDialogRef.current?.close();
+    }
+  }, [pendingQuizRemoval]);
 
   React.useEffect(() => {
     if (!isDirty) return;
@@ -174,6 +193,9 @@ export function CourseForm(props: CourseFormProps) {
     setIsPublished(initialIsPublished);
     setChapters(cloneChapters(initialChapters));
     setMaterials(hydrateMaterials(initialChapters));
+    setQuizzes([]);
+    setEditingQuiz(null);
+    setQuizEditorDirty(false);
     setErrors({});
     setCurriculumErrors({});
     setMaterialErrors({});
@@ -220,8 +242,35 @@ export function CourseForm(props: CourseFormProps) {
       isPublished,
       chapters: cloneChapters(chapters),
       materials: Object.fromEntries(Object.entries(materials).map(([id, material]) => [id, { ...material }])),
+      quizzes: quizzes.map(cloneQuizDraft),
     } : {}) });
   };
+
+  const restoreQuizFocus = () => {
+    if (quizTriggerRef.current?.isConnected) quizTriggerRef.current.focus();
+    else document.getElementById("course-title")?.focus();
+  };
+  const closeQuizEditor = () => {
+    setEditingQuiz(null);
+    setQuizEditorDirty(false);
+    requestAnimationFrame(restoreQuizFocus);
+  };
+  const openQuizEditor = (quiz: InstructorQuizDraft, trigger: HTMLButtonElement) => {
+    quizTriggerRef.current = trigger;
+    setEditingQuiz(cloneQuizDraft(quiz));
+  };
+  const renderQuizzes = (placement: QuizPlacement) => (
+    <QuizPlacementSection
+      placement={placement}
+      quizzes={quizzes}
+      disabled={!isReady}
+      onAdd={(target, trigger) => {
+        if (props.mode === "edit") openQuizEditor(createQuizDraft(props.courseId, target), trigger);
+      }}
+      onEdit={openQuizEditor}
+      onRemove={(quiz, trigger) => { quizTriggerRef.current = trigger; setPendingQuizRemoval(quiz); }}
+    />
+  );
 
   return (
     <div data-component="CourseForm" className="course-form__container_01 min-h-screen bg-background pb-16">
@@ -307,10 +356,15 @@ export function CourseForm(props: CourseFormProps) {
                 </section>
               )}
               {mode === "edit" && (
+                renderQuizzes({ kind: "course" })
+              )}
+              {mode === "edit" && (
                 <CurriculumBuilder
                   chapters={chapters}
                   materials={materials}
                   onMaterialChange={changeMaterial}
+                  quizzes={quizzes}
+                  renderQuizzes={renderQuizzes}
                   errors={curriculumErrors}
                   materialErrors={materialErrors}
                   disabled={!isReady}
@@ -318,6 +372,7 @@ export function CourseForm(props: CourseFormProps) {
                     allowLeaveRef.current = false;
                     setChapters(nextChapters);
                     setMaterials((previous) => pruneMaterials(previous, nextChapters));
+                    setQuizzes((previous) => pruneQuizDrafts(previous, nextChapters));
                     setCurriculumErrors({});
                     setMaterialErrors({});
                     setPreview(null);
@@ -362,6 +417,21 @@ export function CourseForm(props: CourseFormProps) {
                   </div>
                 )}
               </dl>
+              {preview.quizzes && preview.quizzes.length > 0 && (
+                <section aria-labelledby="course-quizzes-preview-title" className="course-form__quiz-preview_01 mt-6 space-y-3">
+                  <h3 id="course-quizzes-preview-title" className="course-form__section-title_03 font-display text-lg font-bold">Quiz Drafts</h3>
+                  <p className="course-form__quiz-notice_01 text-xs text-muted-foreground">Not saved to a server. Review questions and settings using Edit Quiz.</p>
+                  <ul className="course-form__quiz-list_01 space-y-2">
+                    {preview.quizzes.map((quiz) => (
+                      <li key={quiz.id} className="course-form__quiz-summary_01 space-y-1 rounded-lg border border-border p-3 text-sm">
+                        <p className="course-form__quiz-title_01 break-words font-semibold">{quiz.title}</p>
+                        <p className="course-form__quiz-placement_01 break-words text-muted-foreground">{describeQuizPlacement(quiz.placement, preview.title, preview.chapters ?? [])}</p>
+                        <p className="course-form__quiz-count_01 text-muted-foreground">{quiz.questions.length} {quiz.questions.length === 1 ? "question" : "questions"}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               {preview.chapters && (
                 <section className="course-form__curriculum-preview_01 mt-6 space-y-4" aria-labelledby="curriculum-preview-title">
                   <h3 id="curriculum-preview-title" className="course-form__section-title_02 font-display text-lg font-bold">Course Curriculum</h3>
@@ -415,13 +485,44 @@ export function CourseForm(props: CourseFormProps) {
           </Card>
         )}
 
+        {editingQuiz && (
+          <QuizEditor key={editingQuiz.id} initialValue={editingQuiz}
+            placementLabel={describeQuizPlacement(editingQuiz.placement, values.title, chapters)}
+            onDirtyChange={setQuizEditorDirty}
+            onClose={closeQuizEditor}
+            onApply={(draft) => {
+              allowLeaveRef.current = false;
+              setQuizzes((previous) => previous.some((quiz) => quiz.id === draft.id)
+                ? previous.map((quiz) => quiz.id === draft.id ? cloneQuizDraft(draft) : quiz)
+                : [...previous, cloneQuizDraft(draft)]);
+              setPreview(null);
+              closeQuizEditor();
+            }} />
+        )}
+
+        <dialog ref={quizRemoveDialogRef} aria-labelledby="course-remove-quiz-title" aria-describedby="course-remove-quiz-message"
+          onCancel={(event) => { event.preventDefault(); setPendingQuizRemoval(null); }}
+          onClose={restoreQuizFocus}
+          className="course-form__dialog_03 w-[calc(100%_-_2rem)] max-w-md rounded-[15px] border border-border bg-card p-6 text-card-foreground shadow-lg backdrop:bg-black/50">
+          <h2 id="course-remove-quiz-title" className="course-form__dialog-title_03 font-display text-xl font-bold">Remove this quiz?</h2>
+          <p id="course-remove-quiz-message" className="course-form__dialog-message_03 mt-3 break-words text-sm text-muted-foreground">Removing {pendingQuizRemoval?.title} discards its questions and settings from this course draft.</p>
+          <div className="course-form__dialog-actions_03 mt-6 flex flex-col gap-3 sm:flex-row">
+            <Button ref={keepQuizRef} type="button" variant="outline" onClick={() => setPendingQuizRemoval(null)}>Keep Quiz</Button>
+            <Button type="button" variant="destructive" onClick={() => {
+              setQuizzes((previous) => previous.filter((quiz) => quiz.id !== pendingQuizRemoval?.id));
+              setPreview(null);
+              setPendingQuizRemoval(null);
+            }}>Remove Quiz</Button>
+          </div>
+        </dialog>
+
         <dialog ref={resetDialogRef} aria-labelledby="course-reset-title" aria-describedby="course-reset-message"
           onCancel={(event) => { event.preventDefault(); setIsResetPending(false); }}
           onClose={() => { setIsResetPending(false); resetButtonRef.current?.focus(); }}
           className="course-form__dialog_02 w-[calc(100%_-_2rem)] max-w-md rounded-[15px] border border-border bg-card p-6 text-card-foreground shadow-lg backdrop:bg-black/50">
           <h2 id="course-reset-title" className="course-form__dialog-title_02 font-display text-xl font-bold">Reset all changes?</h2>
           <p id="course-reset-message" className="course-form__dialog-message_02 mt-3 text-sm text-muted-foreground">
-            This will discard all unsaved changes to the course information, chapters, lessons, and learning materials. This action cannot be undone.
+            This will discard all unsaved changes to the course information, chapters, lessons, learning materials, and quizzes. This action cannot be undone.
           </p>
           <div className="course-form__dialog-actions_02 mt-6 flex flex-col gap-3 sm:flex-row">
             <Button ref={keepEditingRef} type="button" variant="outline" onClick={() => setIsResetPending(false)}>Keep Editing</Button>
