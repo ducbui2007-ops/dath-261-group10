@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { QuestionBuilder } from "@/components/quiz/question-builder";
+import { QuestionImport } from "@/components/quiz/question-import";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -19,6 +20,7 @@ import {
   type QuestionDraft,
 } from "@/lib/instructor-quiz";
 import { cn } from "@/lib/utils";
+import { appendImportedQuestions, type ImportedQuestion } from "@/lib/quiz-question-import";
 
 interface QuizEditorProps {
   initialValue: InstructorQuizDraft;
@@ -49,6 +51,10 @@ export function QuizEditor({ initialValue, placementLabel, onApply, onClose, onD
   const [errors, setErrors] = React.useState<QuizErrors>({});
   const [preview, setPreview] = React.useState<InstructorQuizDraft | null>(null);
   const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
+  const [collapsedQuestions, setCollapsedQuestions] = React.useState<Set<string>>(() => new Set());
+  const [focusFieldId, setFocusFieldId] = React.useState<string | null>(null);
+  const [importSession, setImportSession] = React.useState(0);
+  const touchedQuestionsRef = React.useRef(new Set<string>());
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const formRef = React.useRef<HTMLFormElement>(null);
   const titleRef = React.useRef<HTMLInputElement>(null);
@@ -74,6 +80,14 @@ export function QuizEditor({ initialValue, placementLabel, onApply, onClose, onD
 
   React.useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
   React.useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+
+  React.useEffect(() => {
+    if (!focusFieldId) return;
+    const field = document.getElementById(focusFieldId);
+    field?.scrollIntoView({ block: "center" });
+    field?.focus({ preventScroll: true });
+    setFocusFieldId(null);
+  }, [focusFieldId, collapsedQuestions]);
 
   React.useEffect(() => {
     if (pendingAction) {
@@ -108,19 +122,51 @@ export function QuizEditor({ initialValue, placementLabel, onApply, onClose, onD
     setDraft(cloneQuizDraft(initialDraft));
     setErrors({});
     setPreview(null);
+    setCollapsedQuestions(new Set());
+    touchedQuestionsRef.current.clear();
+    setImportSession((current) => current + 1);
   };
 
   const removeQuestion = (questionId: string) => {
     updateDraft((current) => ({ ...current, questions: current.questions.filter((question) => question.id !== questionId) }));
+    touchedQuestionsRef.current.delete(questionId);
+    setCollapsedQuestions((previous) => {
+      const next = new Set(previous);
+      next.delete(questionId);
+      return next;
+    });
+  };
+
+  const addQuestion = () => {
+    const question = createQuestionDraft();
+    updateDraft((current) => ({ ...current, questions: [...current.questions, question] }));
+    setFocusFieldId(`${question.id}-prompt`);
+  };
+
+  const importQuestions = (incoming: ImportedQuestion[]) => {
+    const replacePlaceholder = draft.questions.length === 1 && !touchedQuestionsRef.current.has(draft.questions[0].id);
+    const questions = appendImportedQuestions(draft.questions, incoming, replacePlaceholder);
+    const firstNewQuestion = questions.find((question) => !draft.questions.some((existing) => existing.id === question.id));
+    updateDraft((current) => ({ ...current, questions }));
+    if (firstNewQuestion) setFocusFieldId(`${firstNewQuestion.id}-prompt`);
   };
 
   const validate = () => {
     const nextErrors = validateQuizDraft(draft);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length === 0) return true;
-    const fields = formRef.current?.querySelectorAll<HTMLElement>("[id]");
-    const firstInvalid = fields && Array.from(fields).find((field) => Boolean(nextErrors[field.id]));
-    firstInvalid?.focus();
+    const fieldOrder = ["quiz-title", "quiz-questions", ...draft.questions.flatMap((question) => [
+      `${question.id}-prompt`, `${question.id}-correct`,
+      ...question.options.map((_, index) => `${question.id}-options-${index}`), `${question.id}-points`,
+    ]), "quiz-time-limit", "quiz-grading-method", "quiz-available-from", "quiz-available-until", "quiz-max-attempts"];
+    const firstInvalid = fieldOrder.find((id) => Boolean(nextErrors[id]));
+    const question = draft.questions.find((item) => firstInvalid?.startsWith(`${item.id}-`));
+    if (question) setCollapsedQuestions((previous) => {
+      const next = new Set(previous);
+      next.delete(question.id);
+      return next;
+    });
+    if (firstInvalid) setFocusFieldId(firstInvalid);
     return false;
   };
 
@@ -159,26 +205,34 @@ export function QuizEditor({ initialValue, placementLabel, onApply, onClose, onD
           <Card className="quiz-editor__questions_01 rounded-[15px]">
             <CardHeader className="quiz-editor__questions-header_01 gap-4 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="quiz-editor__section-title_01 font-display text-xl font-bold">Questions</h3>
-              <Button ref={addQuestionRef} type="button" variant="outline" onClick={() => updateDraft((current) => ({
-                ...current, questions: [...current.questions, createQuestionDraft()],
-              }))} className="quiz-editor__add-question_01">Add Question</Button>
+              <div className="quiz-editor__question-view_01 flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" disabled={draft.questions.length === 0}
+                  onClick={() => setCollapsedQuestions(new Set(draft.questions.map((question) => question.id)))}
+                  className="quiz-editor__collapse-all_01">Collapse All</Button>
+                <Button type="button" variant="outline" size="sm" disabled={draft.questions.length === 0}
+                  onClick={() => setCollapsedQuestions(new Set())}
+                  className="quiz-editor__expand-all_01">Expand All</Button>
+              </div>
             </CardHeader>
             <CardContent id="quiz-questions" tabIndex={-1} aria-describedby={errors["quiz-questions"] ? "quiz-questions-error" : undefined}
               className="quiz-editor__question-list_01 space-y-4 focus:outline-none focus:ring-2 focus:ring-ring">
+              <QuestionImport key={importSession} onConfirm={importQuestions} />
               {draft.questions.length === 0 && <p className="quiz-editor__empty_01 text-sm text-muted-foreground">No questions yet. Add a question to start your quiz.</p>}
               {draft.questions.map((question, index) => (
-                <QuestionBuilder key={question.id} question={question} index={index} total={draft.questions.length} errors={errors}
-                  onChange={(nextQuestion) => updateDraft((current) => ({
-                    ...current, questions: current.questions.map((item) => item.id === question.id ? nextQuestion : item),
-                  }))}
-                  onMove={(direction) => updateDraft((current) => {
-                    const questions = [...current.questions];
-                    const from = questions.findIndex((item) => item.id === question.id);
-                    const to = from + direction;
-                    if (from < 0 || to < 0 || to >= questions.length) return current;
-                    [questions[from], questions[to]] = [questions[to], questions[from]];
-                    return { ...current, questions };
+                <QuestionBuilder key={question.id} question={question} index={index} errors={errors}
+                  expanded={!collapsedQuestions.has(question.id)}
+                  onExpandedChange={(expanded) => setCollapsedQuestions((previous) => {
+                    const next = new Set(previous);
+                    if (expanded) next.delete(question.id);
+                    else next.add(question.id);
+                    return next;
                   })}
+                  onChange={(nextQuestion) => {
+                    touchedQuestionsRef.current.add(question.id);
+                    updateDraft((current) => ({
+                      ...current, questions: current.questions.map((item) => item.id === question.id ? nextQuestion : item),
+                    }));
+                  }}
                   onRemove={() => {
                     if (hasQuestionContent(question)) {
                       const trigger = document.activeElement instanceof HTMLButtonElement ? document.activeElement : null;
@@ -187,6 +241,8 @@ export function QuizEditor({ initialValue, placementLabel, onApply, onClose, onD
                   }} />
               ))}
               {errors["quiz-questions"] && <p id="quiz-questions-error" role="alert" className="quiz-editor__error_02 text-sm text-destructive">{errors["quiz-questions"]}</p>}
+              <Button ref={addQuestionRef} type="button" variant="outline" onClick={addQuestion}
+                className="quiz-editor__add-question_01">Add Question</Button>
             </CardContent>
           </Card>
 

@@ -1,0 +1,3 @@
+Question,A,B,C,D,Correct,Points,Explanation
+"Which structure supports FIFO, or first in first out?",Stack,Queue,Tree,Graph,B,1,Queues process the earliest added item first.
+What is 2 + 2?,3,4,5,6,B,0.5,Two plus two equals four.
