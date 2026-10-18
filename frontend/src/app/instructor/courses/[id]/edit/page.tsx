@@ -11,6 +11,7 @@ export default function EditCoursePage({ params }: { params: { id: string } }) {
       key={course.id}
       mode="edit"
       courseId={course.id}
+      initialChapters={course.chapters}
       initialValues={{
         title: course.title,
         description: course.description,

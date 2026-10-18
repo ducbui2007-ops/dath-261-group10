@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { CurriculumBuilder } from "@/components/instructor/curriculum-builder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -17,9 +18,10 @@ export type CourseFormValues = Pick<
 
 type CourseFormProps = { initialValues: CourseFormValues } & (
   | { mode: "create" }
-  | { mode: "edit"; courseId: string }
+  | { mode: "edit"; courseId: string; initialChapters: Course["chapters"] }
 );
 type FormErrors = Partial<Record<keyof CourseFormValues, string>>;
+type CoursePreview = CourseFormValues & { chapters?: Course["chapters"] };
 
 const FIELDS = [
   ["title", "Course Title"],
@@ -31,6 +33,13 @@ const FIELDS = [
 const LEVELS: Course["level"][] = ["Beginner", "Intermediate", "Advanced"];
 const LEAVE_MESSAGE = "You have unsaved changes. Are you sure you want to leave this page?";
 const CONTROL_STYLE = "w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+
+function cloneChapters(chapters: Course["chapters"]): Course["chapters"] {
+  return chapters.map((chapter) => ({
+    ...chapter,
+    lessons: chapter.lessons.map((lesson) => ({ ...lesson })),
+  }));
+}
 
 function validate(values: CourseFormValues): FormErrors {
   const errors: FormErrors = {};
@@ -51,16 +60,20 @@ function validate(values: CourseFormValues): FormErrors {
 
 export function CourseForm(props: CourseFormProps) {
   const { initialValues, mode } = props;
+  const initialChapters = props.mode === "edit" ? props.initialChapters : [];
   const router = useRouter();
   const [values, setValues] = React.useState<CourseFormValues>(() => ({ ...initialValues }));
+  const [chapters, setChapters] = React.useState(() => cloneChapters(initialChapters));
   const [errors, setErrors] = React.useState<FormErrors>({});
-  const [preview, setPreview] = React.useState<CourseFormValues | null>(null);
+  const [curriculumErrors, setCurriculumErrors] = React.useState<Record<string, string>>({});
+  const [preview, setPreview] = React.useState<CoursePreview | null>(null);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
   const [isReady, setIsReady] = React.useState(false);
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const stayRef = React.useRef<HTMLButtonElement>(null);
   const allowLeaveRef = React.useRef(false);
-  const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]);
+  const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]) ||
+    (mode === "edit" && JSON.stringify(chapters) !== JSON.stringify(initialChapters));
 
   React.useEffect(() => setIsReady(true), []);
 
@@ -106,19 +119,42 @@ export function CourseForm(props: CourseFormProps) {
 
   const reset = () => {
     setValues({ ...initialValues });
+    setChapters(cloneChapters(initialChapters));
     setErrors({});
+    setCurriculumErrors({});
     setPreview(null);
   };
   const review = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextErrors = validate(values);
+    const nextCurriculumErrors: Record<string, string> = {};
+    let invalidCurriculumField: string | undefined;
+    if (mode === "edit") {
+      for (const chapter of chapters) {
+        if (!chapter.title.trim()) {
+          nextCurriculumErrors[chapter.id] = "Enter a chapter title.";
+          invalidCurriculumField ??= `curriculum-chapter-${chapter.id}`;
+        }
+        for (const lesson of chapter.lessons) {
+          if (!lesson.title.trim()) {
+            nextCurriculumErrors[lesson.id] = "Enter a lesson title.";
+            invalidCurriculumField ??= `curriculum-lesson-${lesson.id}`;
+          }
+        }
+      }
+    }
     setErrors(nextErrors);
+    setCurriculumErrors(nextCurriculumErrors);
     const invalidField = FIELDS.find(([name]) => nextErrors[name]);
     if (invalidField) {
       document.getElementById(`course-${invalidField[0]}`)?.focus();
       return;
     }
-    setPreview({ ...values });
+    if (invalidCurriculumField) {
+      document.getElementById(invalidCurriculumField)?.focus();
+      return;
+    }
+    setPreview({ ...values, ...(mode === "edit" ? { chapters: cloneChapters(chapters) } : {}) });
   };
 
   return (
@@ -146,6 +182,9 @@ export function CourseForm(props: CourseFormProps) {
               </div>
             )}
             <form onSubmit={review} noValidate className="course-form__form_01 space-y-6">
+              {mode === "edit" && (
+                <h2 className="course-form__section-title_01 font-display text-xl font-bold">Course Information</h2>
+              )}
               <div className="course-form__grid_01 grid grid-cols-1 gap-6 md:grid-cols-2">
                 {FIELDS.map(([name, label]) => {
                   const inputProps = {
@@ -177,6 +216,19 @@ export function CourseForm(props: CourseFormProps) {
                   );
                 })}
               </div>
+              {mode === "edit" && (
+                <CurriculumBuilder
+                  chapters={chapters}
+                  errors={curriculumErrors}
+                  disabled={!isReady}
+                  onChange={(nextChapters) => {
+                    allowLeaveRef.current = false;
+                    setChapters(nextChapters);
+                    setCurriculumErrors({});
+                    setPreview(null);
+                  }}
+                />
+              )}
               <div className="course-form__actions_01 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <Button type="submit" disabled={!isReady}>{mode === "edit" ? "Review Changes" : "Preview Course"}</Button>
                 <Button type="button" variant="outline" disabled={!isReady} onClick={reset}>Reset</Button>
@@ -190,7 +242,7 @@ export function CourseForm(props: CourseFormProps) {
         {preview && (
           <Card className="course-form__preview_01 rounded-[15px]" aria-live="polite">
             <CardHeader className="course-form__preview-header_01 space-y-3">
-              <h2 className="course-form__preview-title_01 font-display text-xl font-bold">Course Metadata Preview</h2>
+              <h2 className="course-form__preview-title_01 font-display text-xl font-bold">{mode === "edit" ? "Course Preview" : "Course Metadata Preview"}</h2>
               <Badge variant="outline" className="course-form__preview-badge_01 self-start">Preview only — not saved</Badge>
             </CardHeader>
             <CardContent className="course-form__preview-body_01">
@@ -202,6 +254,34 @@ export function CourseForm(props: CourseFormProps) {
                   </div>
                 ))}
               </dl>
+              {preview.chapters && (
+                <section className="course-form__curriculum-preview_01 mt-6 space-y-4" aria-labelledby="curriculum-preview-title">
+                  <h3 id="curriculum-preview-title" className="course-form__section-title_02 font-display text-lg font-bold">Course Curriculum</h3>
+                  {preview.chapters.length === 0 ? (
+                    <p className="course-form__empty_01 text-sm text-muted-foreground">No chapters added yet.</p>
+                  ) : (
+                    <ol className="course-form__preview-chapters_01 space-y-4">
+                      {preview.chapters.map((chapter) => (
+                        <li key={chapter.id} className="course-form__preview-chapter_01 space-y-3 rounded-lg border border-border p-4">
+                          <h4 className="course-form__chapter-title_01 break-words font-medium">{chapter.order}. {chapter.title}</h4>
+                          {chapter.lessons.length === 0 ? (
+                            <p className="course-form__empty_02 text-sm text-muted-foreground">No lessons added yet.</p>
+                          ) : (
+                            <ol className="course-form__preview-lessons_01 space-y-2 pl-4">
+                              {chapter.lessons.map((lesson) => (
+                                <li key={lesson.id} className="course-form__preview-lesson_01 flex flex-wrap items-center justify-between gap-2 text-sm">
+                                  <span className="course-form__lesson-title_01 min-w-0 break-words">{chapter.order}.{lesson.order} {lesson.title}</span>
+                                  <Badge variant="outline" className="course-form__lesson-type_01 capitalize">{lesson.type}</Badge>
+                                </li>
+                              ))}
+                            </ol>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              )}
             </CardContent>
           </Card>
         )}

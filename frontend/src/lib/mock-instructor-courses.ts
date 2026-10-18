@@ -2,7 +2,7 @@ import type { InstructorCourseCardData } from "@/components/instructor/instructo
 import type { Course } from "@/types/course";
 
 type MockInstructorCourse = InstructorCourseCardData &
-  Pick<Course, "description" | "thumbnailUrl" | "category" | "level">;
+  Pick<Course, "description" | "thumbnailUrl" | "category" | "level" | "chapters">;
 
 // Sample metadata for local previews only; these fixtures are not server records.
 export const MOCK_INSTRUCTOR_COURSES: MockInstructorCourse[] = [
@@ -15,6 +15,7 @@ export const MOCK_INSTRUCTOR_COURSES: MockInstructorCourse[] = [
     thumbnailUrl: "https://example.com/courses/data-structures-and-algorithms.png",
     category: "Computer Science",
     level: "Intermediate",
+    chapters: [],
   },
   {
     id: "software-engineering",
@@ -25,6 +26,7 @@ export const MOCK_INSTRUCTOR_COURSES: MockInstructorCourse[] = [
     thumbnailUrl: "https://example.com/courses/software-engineering.png",
     category: "Software Engineering",
     level: "Beginner",
+    chapters: [],
   },
   {
     id: "computer-networks",
@@ -35,5 +37,6 @@ export const MOCK_INSTRUCTOR_COURSES: MockInstructorCourse[] = [
     thumbnailUrl: "https://example.com/courses/computer-networks.png",
     category: "Networking",
     level: "Intermediate",
+    chapters: [],
   },
 ];
