@@ -84,9 +84,13 @@ export function CourseForm(props: CourseFormProps) {
   const [materialErrors, setMaterialErrors] = React.useState<Record<string, string>>({});
   const [preview, setPreview] = React.useState<CoursePreview | null>(null);
   const [pendingHref, setPendingHref] = React.useState<string | null>(null);
+  const [isResetPending, setIsResetPending] = React.useState(false);
   const [isReady, setIsReady] = React.useState(false);
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const stayRef = React.useRef<HTMLButtonElement>(null);
+  const resetDialogRef = React.useRef<HTMLDialogElement>(null);
+  const keepEditingRef = React.useRef<HTMLButtonElement>(null);
+  const resetButtonRef = React.useRef<HTMLButtonElement>(null);
   const allowLeaveRef = React.useRef(false);
   const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]) ||
     (mode === "edit" && (JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
@@ -107,6 +111,15 @@ export function CourseForm(props: CourseFormProps) {
       dialogRef.current?.close();
     }
   }, [pendingHref]);
+
+  React.useEffect(() => {
+    if (isResetPending) {
+      if (!resetDialogRef.current?.open) resetDialogRef.current?.showModal();
+      keepEditingRef.current?.focus();
+    } else {
+      resetDialogRef.current?.close();
+    }
+  }, [isResetPending]);
 
   React.useEffect(() => {
     if (!isDirty) return;
@@ -285,7 +298,10 @@ export function CourseForm(props: CourseFormProps) {
               )}
               <div className="course-form__actions_01 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <Button type="submit" disabled={!isReady}>{mode === "edit" ? "Review Changes" : "Preview Course"}</Button>
-                <Button type="button" variant="outline" disabled={!isReady} onClick={reset}>Reset</Button>
+                <Button ref={resetButtonRef} type="button" variant="outline" disabled={!isReady} onClick={() => {
+                  if (isDirty) setIsResetPending(true);
+                  else reset();
+                }}>Reset</Button>
                 <Button type="button" variant="ghost" disabled={!isReady} onClick={() => requestNavigation("/instructor/courses")}>Cancel / Back to Courses</Button>
                 {isDirty && <Badge variant="outline" className="course-form__dirty_01 self-center">Unsaved changes</Badge>}
               </div>
@@ -360,6 +376,23 @@ export function CourseForm(props: CourseFormProps) {
             </CardContent>
           </Card>
         )}
+
+        <dialog ref={resetDialogRef} aria-labelledby="course-reset-title" aria-describedby="course-reset-message"
+          onCancel={(event) => { event.preventDefault(); setIsResetPending(false); }}
+          onClose={() => { setIsResetPending(false); resetButtonRef.current?.focus(); }}
+          className="course-form__dialog_02 w-[calc(100%_-_2rem)] max-w-md rounded-[15px] border border-border bg-card p-6 text-card-foreground shadow-lg backdrop:bg-black/50">
+          <h2 id="course-reset-title" className="course-form__dialog-title_02 font-display text-xl font-bold">Reset all changes?</h2>
+          <p id="course-reset-message" className="course-form__dialog-message_02 mt-3 text-sm text-muted-foreground">
+            This will discard all unsaved changes to the course information, chapters, lessons, and learning materials. This action cannot be undone.
+          </p>
+          <div className="course-form__dialog-actions_02 mt-6 flex flex-col gap-3 sm:flex-row">
+            <Button ref={keepEditingRef} type="button" variant="outline" onClick={() => setIsResetPending(false)}>Keep Editing</Button>
+            <Button type="button" variant="destructive" onClick={() => {
+              reset();
+              setIsResetPending(false);
+            }}>Reset Changes</Button>
+          </div>
+        </dialog>
 
         <dialog ref={dialogRef} aria-labelledby="course-leave-title" aria-describedby="course-leave-message"
           onCancel={() => setPendingHref(null)}
