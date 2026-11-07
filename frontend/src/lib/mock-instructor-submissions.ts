@@ -112,6 +112,22 @@ const CODE_ASSESSMENT = {
 // Fictional, deterministic local previews only; not backend records or persisted grades.
 // Code test results are sample historical output, not execution in the browser.
 export const MOCK_INSTRUCTOR_SUBMISSIONS: InstructorSubmission[] = [
+  {
+    id: "sample-submission-written-rubric", type: "written", student: { ...STUDENTS[0] }, course: { ...SOFTWARE },
+    assessment: {
+      id: "sample-assignment-rubric-analysis", title: "Structured analysis (local rubric)",
+      instructions: "Explain your proposed development process, support it with examples, and organize the response clearly. This is a local rubric demonstration.",
+      maxScore: 10, rubricSource: "local",
+      rubrics: [
+        { id: "local-rubric-reasoning", criterionName: "Reasoning", description: "Explain the process and justify the main decisions.", maxPoints: 4 },
+        { id: "local-rubric-evidence", criterionName: "Evidence", description: "Support the argument with practical examples.", maxPoints: 4 },
+        { id: "local-rubric-clarity", criterionName: "Clarity", description: "Use a clear structure and precise language.", maxPoints: 2 },
+      ],
+    },
+    submittedAt: "2026-10-20T09:00:00Z", attemptNumber: 1,
+    writtenAnswer: "I propose iterative delivery, with acceptance criteria for each release and demonstrations to validate the registration rules with event organizers.",
+    attachments: [], grading: { status: "pending", score: null, feedback: "", gradedAt: null },
+  },
   createMockQuizSubmission(
     { id: "sample-submission-quiz-pending", student: STUDENTS[1], submittedAt: "2026-10-16T09:12:00Z", attemptNumber: 1 },
     ALGORITHMS_QUIZ,

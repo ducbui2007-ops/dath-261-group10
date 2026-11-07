@@ -5,7 +5,7 @@ import type {
 
 // Sum the canonical decimal point values exactly, then convert once to a number.
 // No fixed decimal limit is imposed on authored points or entered grades.
-function sumGradePoints(values: number[]): number {
+export function sumGradePoints(values: number[]): number {
   if (values.some((value) => !Number.isFinite(value))) return NaN;
   const parts = values.map((value) => {
     const [coefficient, exponent = "0"] = value.toString().split("e");

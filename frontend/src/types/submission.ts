@@ -6,12 +6,27 @@ import type { CodeSubmission, Question, Quiz } from "@/types/quiz";
 export type SubmissionStudent = Pick<User, "id" | "fullName" | "email" | "avatarUrl">;
 export type SubmissionCourse = Pick<Course, "id" | "title">;
 
+export interface RubricCriterion {
+  id: string;
+  criterionName: string;
+  description?: string;
+  maxPoints: number;
+}
+
+export interface RubricEvaluation {
+  rubricId: string;
+  pointsAwarded: number;
+  feedback?: string;
+}
+
 export interface SubmissionAssessment {
   id: string;
   title: string;
   instructions: string;
   maxScore: number;
   deadline?: string;
+  rubrics?: RubricCriterion[];
+  rubricSource?: "local" | "server";
 }
 
 export type SubmissionGrading =
@@ -48,6 +63,7 @@ interface SubmissionBase {
   submittedAt: string;
   attemptNumber: number;
   grading: SubmissionGrading;
+  rubricEvaluations?: RubricEvaluation[];
 }
 
 export type QuizSubmission = SubmissionBase & {

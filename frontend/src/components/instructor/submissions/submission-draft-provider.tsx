@@ -3,13 +3,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
   createGradingDraft, editGradingDraft, reviewGradingDraft, sameGradingDraftValues,
-  type GradingDraft, type GradingDraftChanges, type ManualGradingSubmission,
+  type GradingDraft, type GradingDraftValues, type GradingDraftChanges, type ManualGradingSubmission,
 } from "@/lib/instructor-grading-draft";
 
 interface SubmissionDraftContextValue {
   drafts: Record<string, GradingDraft>;
   updateDraft: (submission: ManualGradingSubmission, changes: GradingDraftChanges) => void;
-  confirmDraft: (submission: ManualGradingSubmission, expected: Pick<GradingDraft, "score" | "feedback">) => void;
+  confirmDraft: (submission: ManualGradingSubmission, expected: GradingDraftValues) => void;
   resetDraft: (id: string) => void;
 }
 
@@ -57,7 +57,7 @@ export function SubmissionDraftProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const confirmDraft = (submission: ManualGradingSubmission, expected: Pick<GradingDraft, "score" | "feedback">) => {
+  const confirmDraft = (submission: ManualGradingSubmission, expected: GradingDraftValues) => {
     setDrafts((previous) => {
       const current = previous[submission.id] ?? createGradingDraft(submission);
       if (!sameGradingDraftValues(current, expected)) return previous;

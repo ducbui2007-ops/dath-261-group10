@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatGradeScore, validateGrade } from "@/lib/instructor-grading";
-import { createGradingDraft, type ManualGradingSubmission } from "@/lib/instructor-grading-draft";
+import { createGradingDraft, type GradingDraftValues, type ManualGradingSubmission } from "@/lib/instructor-grading-draft";
+import { scoreRubric } from "@/lib/rubric-grading";
+import { RubricGradingFields } from "./rubric-grading-fields";
 import { GradingDraftDialog } from "./grading-draft-dialog";
 import { useSubmissionDrafts } from "./submission-draft-provider";
 
 type DraftDialog =
-  | { mode: "review"; score: number; rawScore: string; feedback: string }
+  | { mode: "review"; score: number; values: GradingDraftValues }
   | { mode: "reset" };
 
 export function ManualGradingForm({ submission }: { submission: ManualGradingSubmission }) {
@@ -18,12 +20,15 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
   const storedDraft = drafts[submission.id];
   const draft = storedDraft ?? createGradingDraft(submission);
   const [error, setError] = useState<string | null>(null);
+  const [showRubricErrors, setShowRubricErrors] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [dialog, setDialog] = useState<DraftDialog | null>(null);
   const scoreRef = useRef<HTMLInputElement>(null);
   const reviewButtonRef = useRef<HTMLButtonElement>(null);
   const resetButtonRef = useRef<HTMLButtonElement>(null);
   const maxScore = submission.assessment.maxScore;
+  const rubrics = submission.assessment.rubrics;
+  const rubricResult = rubrics !== undefined ? scoreRubric(rubrics, draft.evaluations ?? {}, maxScore) : null;
 
   useEffect(() => { setIsHydrated(true); }, []);
 
@@ -35,6 +40,12 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
 
   function reviewGrade() {
     if (!isHydrated) return;
+    if (rubricResult && rubricResult.score === null) {
+      setShowRubricErrors(true);
+      const index = rubrics!.findIndex((rubric) => rubricResult.errors[rubric.id]);
+      document.getElementById(rubricResult.errors.rubric || index < 0 ? "grading-rubric" : `rubric-score-${index}`)?.focus();
+      return;
+    }
     const result = validateGrade(draft.score, maxScore);
     if (!result.valid) {
       setError(result.error);
@@ -42,7 +53,10 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
       return;
     }
     setError(null);
-    setDialog({ mode: "review", score: result.score, rawScore: draft.score, feedback: draft.feedback });
+    setDialog({ mode: "review", score: result.score, values: {
+      score: draft.score, feedback: draft.feedback,
+      ...(draft.evaluations ? { evaluations: Object.fromEntries(Object.entries(draft.evaluations).map(([id, value]) => [id, { ...value }])) } : {}),
+    } });
   }
 
   function closeDialog(focusReset = false) {
@@ -52,10 +66,11 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
 
   function confirmDialog() {
     if (dialog?.mode === "review") {
-      confirmDraft(submission, { score: dialog.rawScore, feedback: dialog.feedback });
+      confirmDraft(submission, dialog.values);
     } else if (dialog?.mode === "reset") {
       resetDraft(submission.id);
       setError(null);
+      setShowRubricErrors(false);
     }
     closeDialog();
   }
@@ -65,15 +80,19 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
       <CardHeader className="manual-grading__header_01 space-y-2">
         <h2 id="manual-grading-title" className="manual-grading__title_01 font-display text-lg font-bold">Grading draft</h2>
         <p className="manual-grading__description_01 text-sm leading-relaxed text-muted-foreground">
-          Prepare a draft score and feedback.
+          {rubrics !== undefined ? "Prepare rubric scores and feedback. Nothing is saved to the server or sent to students." : "Prepare a draft score and feedback."}
         </p>
       </CardHeader>
       <CardContent className="manual-grading__content_01 space-y-4">
         <p role="status" className="manual-grading__status_01 rounded-lg border border-border bg-muted p-3 text-sm">
           {!isHydrated ? "Grading requires JavaScript. Controls become available after this page finishes loading." : storedDraft
             ? draft.reviewed ? "Draft reviewed locally." : "Draft changes need review."
-            : "The fields start with the recorded values. Changes create a draft."}
+            : submission.grading.status === "pending" ? "Not graded. Enter scores to prepare a local draft." : "The fields start with the recorded values. Changes create a draft."}
         </p>
+        {rubrics !== undefined && <p className="manual-grading__rubric-source_01 text-xs text-muted-foreground">
+          {submission.assessment.rubricSource === "server" ? "Server rubric data — changes remain local until API integration."
+            : "Local rubric example — not server data. These criteria cannot be used to submit real grades."}
+        </p>}
         <div role="form" aria-labelledby="manual-grading-title" className="manual-grading__form_01">
           <fieldset
             disabled={!isHydrated}
@@ -85,7 +104,16 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
               }
             }}
           >
+            {rubrics !== undefined && <RubricGradingFields rubrics={rubrics} evaluations={draft.evaluations ?? {}}
+              errors={showRubricErrors ? rubricResult!.errors : { ...(rubricResult!.errors.rubric ? { rubric: rubricResult!.errors.rubric } : {}) }}
+              onChange={(evaluations) => updateDraft(submission, { evaluations })} />}
             <div className="manual-grading__score-field_01 space-y-2">
+              {rubricResult ? <>
+                <p className="manual-grading__total-label_01 text-sm font-semibold">Calculated rubric total</p>
+                <p role="status" className="manual-grading__total_01 text-xl font-bold">
+                  {rubricResult.score === null ? "Incomplete or invalid scores" : `${formatGradeScore(rubricResult.score)} / ${formatGradeScore(maxScore)} points`}
+                </p>
+              </> : <>
               <label htmlFor="grading-score" className="manual-grading__label_01 block text-sm font-semibold">Grade (points)</label>
               <Input
                 ref={scoreRef}
@@ -103,9 +131,10 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
               />
               <p id="grading-score-help" className="manual-grading__score-help_01 text-xs text-muted-foreground">0–{formatGradeScore(maxScore)} points; decimals allowed.</p>
               {error && <p id="grading-score-error" role="alert" className="manual-grading__error_01 text-sm font-medium text-red-700 dark:rounded-md dark:bg-red-950 dark:px-2 dark:py-1 dark:text-red-300">{error}</p>}
+              </>}
             </div>
             <div className="manual-grading__feedback-field_01 space-y-2">
-              <label htmlFor="grading-feedback" className="manual-grading__label_02 block text-sm font-semibold">Instructor feedback</label>
+              <label htmlFor="grading-feedback" className="manual-grading__label_02 block text-sm font-semibold">{rubrics !== undefined ? "General Feedback" : "Instructor feedback"}</label>
               <textarea
                 id="grading-feedback"
                 rows={5}
@@ -130,7 +159,12 @@ export function ManualGradingForm({ submission }: { submission: ManualGradingSub
           assessmentTitle={submission.assessment.title}
           maxScore={maxScore}
           score={dialog.mode === "review" ? dialog.score : undefined}
-          feedback={dialog.mode === "review" ? dialog.feedback : undefined}
+          feedback={dialog.mode === "review" ? dialog.values.feedback : undefined}
+          rubricRows={dialog.mode === "review" ? rubrics?.map((rubric) => ({
+            criterionName: rubric.criterionName, maxPoints: rubric.maxPoints,
+            score: dialog.values.evaluations?.[rubric.id]?.score ?? "",
+            feedback: dialog.values.evaluations?.[rubric.id]?.feedback ?? "",
+          })) : undefined}
           onCancel={() => closeDialog(dialog.mode === "reset")}
           onConfirm={confirmDialog}
         />
