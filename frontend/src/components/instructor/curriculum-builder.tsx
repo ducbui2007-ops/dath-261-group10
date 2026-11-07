@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import { MaterialUploader } from "@/components/instructor/material-uploader";
+import { LessonAssignment } from "@/components/instructor/lesson-assignment";
+import type { AssignmentDraft, AssignmentDrafts } from "@/lib/instructor-assignment";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -18,6 +20,9 @@ interface CurriculumBuilderProps {
   onMaterialChange: (lessonId: string, material: MaterialDraft) => void;
   quizzes: InstructorQuizDraft[];
   renderQuizzes: (placement: QuizPlacement) => React.ReactNode;
+  assignments: AssignmentDrafts;
+  onAssignmentChange: (lessonId: string, draft: AssignmentDraft) => void;
+  onAssignmentDirtyChange: (dirty: boolean) => void;
   errors?: Record<string, string>;
   materialErrors?: Record<string, string>;
   disabled?: boolean;
@@ -44,7 +49,7 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
   return result;
 }
 
-export function CurriculumBuilder({ chapters, onChange, materials, onMaterialChange, quizzes, renderQuizzes, errors = {}, materialErrors = {}, disabled = false }: CurriculumBuilderProps) {
+export function CurriculumBuilder({ chapters, onChange, materials, onMaterialChange, quizzes, renderQuizzes, assignments, onAssignmentChange, onAssignmentDirtyChange, errors = {}, materialErrors = {}, disabled = false }: CurriculumBuilderProps) {
   const [pendingDeletion, setPendingDeletion] = React.useState<PendingDeletion | null>(null);
   const dialogRef = React.useRef<HTMLDialogElement>(null);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
@@ -85,7 +90,7 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
   };
   const removeLesson = (chapter: Chapter, lesson: Lesson) => {
     const material = materials[lesson.id] ?? EMPTY_MATERIAL;
-    if (lesson.title.trim() || lesson.contentUrl?.trim() || hasMaterialContent(material) ||
+    if (lesson.title.trim() || lesson.contentUrl?.trim() || hasMaterialContent(material) || assignments[lesson.id] ||
       quizzes.some((quiz) => quiz.placement.kind === "lesson" && quiz.placement.chapterId === chapter.id && quiz.placement.lessonId === lesson.id)) {
       setPendingDeletion({ kind: "lesson", chapterId: chapter.id, lessonId: lesson.id });
     } else {
@@ -171,6 +176,9 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
                           />
                         </div>
                         {renderQuizzes({ kind: "lesson", chapterId: chapter.id, lessonId: lesson.id })}
+                        <LessonAssignment lessonId={lesson.id} lessonTitle={lesson.title} value={assignments[lesson.id]}
+                          disabled={disabled} onDirtyChange={onAssignmentDirtyChange}
+                          onChange={(draft) => onAssignmentChange(lesson.id, draft)} />
                         <div className="curriculum-builder__lesson-actions_01 flex flex-wrap gap-2">
                           <Button type="button" variant="outline" size="sm" disabled={disabled || lessonIndex === 0}
                             aria-label={`Move lesson ${chapterIndex + 1}.${lessonIndex + 1} up`}
@@ -201,8 +209,8 @@ export function CurriculumBuilder({ chapters, onChange, materials, onMaterialCha
         </h2>
         <p id="curriculum-delete-message" className="curriculum-builder__dialog-message_01 mt-3 break-words text-sm text-muted-foreground">
           {pendingDeletion?.kind === "lesson"
-            ? `Removing ${pendingLesson?.title.trim() || "this lesson"} also discards its learning material and quizzes from this curriculum.`
-            : `Removing ${pendingChapter?.title.trim() || "this chapter"} also discards its lessons, their learning materials, and any quizzes in this chapter.`}
+            ? `Removing ${pendingLesson?.title.trim() || "this lesson"} also discards its learning material, quizzes, and assignment from this curriculum.`
+            : `Removing ${pendingChapter?.title.trim() || "this chapter"} also discards its lessons, their learning materials, quizzes, and assignments.`}
         </p>
         <div className="curriculum-builder__dialog-actions_01 mt-6 flex flex-col gap-3 sm:flex-row">
           <Button ref={cancelRef} type="button" variant="outline" onClick={() => setPendingDeletion(null)}>

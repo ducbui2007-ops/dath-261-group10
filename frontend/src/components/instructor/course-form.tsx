@@ -25,6 +25,7 @@ import {
 import { MOCK_INSTRUCTOR_COURSES } from "@/lib/mock-instructor-courses";
 import { cloneQuizDraft, createQuizDraft, describeQuizPlacement, pruneQuizDrafts, type InstructorQuizDraft, type QuizPlacement } from "@/lib/instructor-quiz";
 import { cn } from "@/lib/utils";
+import { pruneAssignmentDrafts, type AssignmentDrafts } from "@/lib/instructor-assignment";
 import type { Course } from "@/types/course";
 
 export type CourseFormValues = Pick<
@@ -37,7 +38,7 @@ type CourseFormProps = { initialValues: CourseFormValues } & (
   | { mode: "edit"; courseId: string; initialChapters: Course["chapters"]; initialIsPublished: Course["isPublished"] }
 );
 type FormErrors = Partial<Record<keyof CourseFormValues, string>>;
-type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts; isPublished?: Course["isPublished"]; quizzes?: InstructorQuizDraft[] };
+type CoursePreview = CourseFormValues & { chapters?: Course["chapters"]; materials?: MaterialDrafts; isPublished?: Course["isPublished"]; quizzes?: InstructorQuizDraft[]; assignments?: AssignmentDrafts };
 
 const FIELDS = [
   ["title", "Course Title"],
@@ -85,6 +86,8 @@ export function CourseForm(props: CourseFormProps) {
   const [chapters, setChapters] = React.useState(() => cloneChapters(initialChapters));
   const [materials, setMaterials] = React.useState(() => hydrateMaterials(initialChapters));
   const [quizzes, setQuizzes] = React.useState<InstructorQuizDraft[]>([]);
+  const [assignments, setAssignments] = React.useState<AssignmentDrafts>({});
+  const [assignmentEditorDirty, setAssignmentEditorDirty] = React.useState(false);
   const [editingQuiz, setEditingQuiz] = React.useState<InstructorQuizDraft | null>(null);
   const [quizEditorDirty, setQuizEditorDirty] = React.useState(false);
   const [pendingQuizRemoval, setPendingQuizRemoval] = React.useState<InstructorQuizDraft | null>(null);
@@ -105,7 +108,7 @@ export function CourseForm(props: CourseFormProps) {
   const keepQuizRef = React.useRef<HTMLButtonElement>(null);
   const allowLeaveRef = React.useRef(false);
   const isDirty = FIELDS.some(([name]) => values[name] !== initialValues[name]) ||
-    (mode === "edit" && (quizzes.length > 0 || quizEditorDirty || isPublished !== initialIsPublished || JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
+    (mode === "edit" && (Object.keys(assignments).length > 0 || assignmentEditorDirty || quizzes.length > 0 || quizEditorDirty || isPublished !== initialIsPublished || JSON.stringify(chapters) !== JSON.stringify(initialChapters) ||
       !materialDraftsEqual(materials, initialMaterials)));
 
   React.useEffect(() => setIsReady(true), []);
@@ -194,6 +197,8 @@ export function CourseForm(props: CourseFormProps) {
     setChapters(cloneChapters(initialChapters));
     setMaterials(hydrateMaterials(initialChapters));
     setQuizzes([]);
+    setAssignments({});
+    setAssignmentEditorDirty(false);
     setEditingQuiz(null);
     setQuizEditorDirty(false);
     setErrors({});
@@ -243,6 +248,7 @@ export function CourseForm(props: CourseFormProps) {
       chapters: cloneChapters(chapters),
       materials: Object.fromEntries(Object.entries(materials).map(([id, material]) => [id, { ...material }])),
       quizzes: quizzes.map(cloneQuizDraft),
+      assignments: Object.fromEntries(Object.entries(assignments).map(([id, draft]) => [id, { ...draft }])),
     } : {}) });
   };
 
@@ -364,6 +370,13 @@ export function CourseForm(props: CourseFormProps) {
                   onMaterialChange={changeMaterial}
                   quizzes={quizzes}
                   renderQuizzes={renderQuizzes}
+                  assignments={assignments}
+                  onAssignmentDirtyChange={setAssignmentEditorDirty}
+                  onAssignmentChange={(lessonId, draft) => {
+                    allowLeaveRef.current = false;
+                    setAssignments((previous) => ({ ...previous, [lessonId]: { ...draft } }));
+                    setPreview(null);
+                  }}
                   errors={curriculumErrors}
                   materialErrors={materialErrors}
                   disabled={!isReady}
@@ -372,6 +385,7 @@ export function CourseForm(props: CourseFormProps) {
                     setChapters(nextChapters);
                     setMaterials((previous) => pruneMaterials(previous, nextChapters));
                     setQuizzes((previous) => pruneQuizDrafts(previous, nextChapters));
+                    setAssignments((previous) => pruneAssignmentDrafts(previous, nextChapters));
                     setCurriculumErrors({});
                     setMaterialErrors({});
                     setPreview(null);
@@ -453,6 +467,11 @@ export function CourseForm(props: CourseFormProps) {
                                       <span className="course-form__lesson-title_01 min-w-0 break-words">{chapter.order}.{lesson.order} {lesson.title}</span>
                                       <Badge variant="outline" className="course-form__lesson-type_01 capitalize">{getMaterialType(material) ?? "Empty draft"}</Badge>
                                     </div>
+                                    {preview.assignments?.[lesson.id] && (
+                                      <p className="course-form__assignment-preview_01 break-words text-sm">
+                                        File assignment: {preview.assignments[lesson.id].title} · {preview.assignments[lesson.id].totalPoints} points · Local draft, not saved
+                                      </p>
+                                    )}
                                     {!hasMaterialContent(material) ? (
                                       <p className="course-form__material-empty_01 text-muted-foreground">No material attached. This lesson is a valid draft.</p>
                                     ) : material.method === "upload" && material.file ? (
@@ -521,7 +540,7 @@ export function CourseForm(props: CourseFormProps) {
           className="course-form__dialog_02 w-[calc(100%_-_2rem)] max-w-md rounded-[15px] border border-border bg-card p-6 text-card-foreground shadow-lg backdrop:bg-black/50">
           <h2 id="course-reset-title" className="course-form__dialog-title_02 font-display text-xl font-bold">Reset all changes?</h2>
           <p id="course-reset-message" className="course-form__dialog-message_02 mt-3 text-sm text-muted-foreground">
-            This will discard all unsaved changes to the course information, chapters, lessons, learning materials, and quizzes. This action cannot be undone.
+            This will discard all unsaved changes to the course information, chapters, lessons, learning materials, quizzes, and assignments. This action cannot be undone.
           </p>
           <div className="course-form__dialog-actions_02 mt-6 flex flex-col gap-3 sm:flex-row">
             <Button ref={keepEditingRef} type="button" variant="outline" onClick={() => setIsResetPending(false)}>Keep Editing</Button>
