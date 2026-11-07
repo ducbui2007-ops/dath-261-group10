@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { CurriculumBuilder } from "@/components/instructor/curriculum-builder";
+import { CourseDeletion } from "@/components/instructor/course-deletion";
 import { QuizEditor } from "@/components/quiz/quiz-editor";
 import { QuizPlacementSection } from "@/components/quiz/quiz-placement-section";
 import { Badge } from "@/components/ui/badge";
@@ -501,6 +502,17 @@ export function CourseForm(props: CourseFormProps) {
               )}
             </CardContent>
           </Card>
+        )}
+
+        {props.mode === "edit" && (
+          <CourseDeletion courseId={props.courseId} courseTitle={initialValues.title}
+            hasUnsavedChanges={isDirty} disabled={!isReady}
+            onDeleted={() => {
+              allowLeaveRef.current = true;
+              reset();
+              router.replace("/instructor/courses");
+              router.refresh();
+            }} />
         )}
 
         {editingQuiz && (
