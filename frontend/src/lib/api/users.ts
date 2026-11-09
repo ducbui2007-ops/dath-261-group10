@@ -20,6 +20,10 @@ export type UserDetails = Omit<User, "createdAt"> & {
   permissions?: Record<string, unknown>;
 };
 
+export type UpdatedUserRole = Pick<User, "id" | "email" | "fullName" | "role"> & {
+  avatarUrl?: string;
+};
+
 export class UsersApiError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message);
@@ -132,5 +136,45 @@ export async function getUserById(
     avatarUrl: user.avatarUrl ?? undefined,
     createdAt: user.createdAt ?? undefined,
     permissions: user.permissions ?? undefined,
+  };
+}
+
+export async function updateUserRole(
+  id: string,
+  role: Role,
+): Promise<UpdatedUserRole> {
+  const response = await fetch(`${APP_CONFIG.apiUrl}/v1/users/${encodeURIComponent(id)}/role`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new UsersApiError(
+      response.status,
+      typeof body.message === "string" ? body.message : response.statusText,
+    );
+  }
+
+  const result = await response.json();
+  const user = result?.data;
+  if (
+    result?.success !== true ||
+    !user ||
+    user.id !== id ||
+    typeof user.email !== "string" ||
+    typeof user.fullName !== "string" ||
+    user.role !== role ||
+    (user.avatarUrl != null && typeof user.avatarUrl !== "string")
+  ) {
+    throw new Error("The role update API returned data in an unexpected format.");
+  }
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    avatarUrl: user.avatarUrl ?? undefined,
   };
 }

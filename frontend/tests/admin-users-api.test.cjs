@@ -11,7 +11,7 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, filename);
 
-const { getUserById, getUsers, UsersApiError } = require("../src/lib/api/users.ts");
+const { getUserById, getUsers, updateUserRole, UsersApiError } = require("../src/lib/api/users.ts");
 const originalFetch = global.fetch;
 const user = {
   id: "user-1", email: "one@example.test", fullName: "User One", role: "student",
@@ -95,6 +95,42 @@ function check(name, fn) { return Promise.resolve().then(fn).then(() => { checks
     await check("rejects a response for a different user", async () => {
       global.fetch = async () => new Response(JSON.stringify({ success: true, data: user }), { status: 200 });
       await assert.rejects(getUserById("10000000-0000-0000-0000-000000000001"), /unexpected format/);
+    });
+    await check("PATCHes the selected role with cookie credentials and validates returned role", async () => {
+      const id = "10000000-0000-0000-0000-000000000001";
+      let request;
+      global.fetch = async (url, options) => {
+        request = { url: String(url), options };
+        return new Response(JSON.stringify({ success: true, message: "updated", data: { id, email: user.email, fullName: user.fullName, role: "instructor", avatarUrl: null } }), { status: 200 });
+      };
+      const result = await updateUserRole(id, "instructor");
+      assert.equal(new URL(request.url).pathname, `/api/v1/users/${id}/role`);
+      assert.equal(request.options.method, "PATCH");
+      assert.equal(request.options.credentials, "include");
+      assert.deepEqual(JSON.parse(request.options.body), { role: "instructor" });
+      assert.equal(result.role, "instructor");
+      assert.equal(result.avatarUrl, undefined);
+      assert.equal("createdAt" in result, false);
+    });
+    for (const status of [400, 401, 403, 404]) {
+      await check(`preserves PATCH HTTP ${status} for the UI`, async () => {
+        global.fetch = async () => new Response(JSON.stringify({ message: `HTTP ${status}` }), { status });
+        await assert.rejects(updateUserRole("10000000-0000-0000-0000-000000000001", "admin"), (error) => error instanceof UsersApiError && error.status === status);
+      });
+    }
+    await check("rejects malformed or mismatched successful PATCH responses", async () => {
+      for (const data of [
+        { id: "10000000-0000-0000-0000-000000000001", email: user.email, fullName: user.fullName, role: "student" },
+        { id: "different", email: user.email, fullName: user.fullName, role: "admin" },
+        { id: "10000000-0000-0000-0000-000000000001", email: user.email, fullName: user.fullName, role: "admin", avatarUrl: 42 },
+      ]) {
+        global.fetch = async () => new Response(JSON.stringify({ success: true, data }), { status: 200 });
+        await assert.rejects(updateUserRole("10000000-0000-0000-0000-000000000001", "admin"), /unexpected format/);
+      }
+    });
+    await check("propagates PATCH network failure", async () => {
+      global.fetch = async () => { throw new TypeError("offline"); };
+      await assert.rejects(updateUserRole("10000000-0000-0000-0000-000000000001", "admin"), /offline/);
     });
     console.log(`${checks} Admin Users API checks passed`);
   } finally {
