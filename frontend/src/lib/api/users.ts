@@ -15,6 +15,11 @@ export interface UsersPage {
   meta: UsersPaginationMeta;
 }
 
+export type UserDetails = Omit<User, "createdAt"> & {
+  createdAt?: string;
+  permissions?: Record<string, unknown>;
+};
+
 export class UsersApiError extends Error {
   constructor(public readonly status: number, message: string) {
     super(message);
@@ -81,5 +86,51 @@ export async function getUsers(
       createdAt: user.createdAt as string,
     })),
     meta: result.meta,
+  };
+}
+
+export async function getUserById(
+  id: string,
+  signal?: AbortSignal,
+): Promise<UserDetails> {
+  const response = await fetch(`${APP_CONFIG.apiUrl}/v1/users/${encodeURIComponent(id)}`, {
+    credentials: "include",
+    signal,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new UsersApiError(
+      response.status,
+      typeof body.message === "string" ? body.message : response.statusText,
+    );
+  }
+
+  const result = await response.json();
+  const user = result?.data;
+  if (
+    result?.success !== true ||
+    !user ||
+    typeof user.id !== "string" ||
+    user.id !== id ||
+    typeof user.email !== "string" ||
+    typeof user.fullName !== "string" ||
+    !isRole(user.role) ||
+    (user.avatarUrl != null && typeof user.avatarUrl !== "string") ||
+    (user.createdAt != null &&
+      (typeof user.createdAt !== "string" || !Number.isFinite(Date.parse(user.createdAt)))) ||
+    (user.permissions != null &&
+      (typeof user.permissions !== "object" || Array.isArray(user.permissions)))
+  ) {
+    throw new Error("The user detail API returned data in an unexpected format.");
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    avatarUrl: user.avatarUrl ?? undefined,
+    createdAt: user.createdAt ?? undefined,
+    permissions: user.permissions ?? undefined,
   };
 }

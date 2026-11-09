@@ -11,7 +11,7 @@ require.extensions[".ts"] = (module, filename) => module._compile(ts.transpileMo
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, filename);
 
-const { getUsers, UsersApiError } = require("../src/lib/api/users.ts");
+const { getUserById, getUsers, UsersApiError } = require("../src/lib/api/users.ts");
 const originalFetch = global.fetch;
 const user = {
   id: "user-1", email: "one@example.test", fullName: "User One", role: "student",
@@ -64,6 +64,37 @@ function check(name, fn) { return Promise.resolve().then(fn).then(() => { checks
     await check("propagates network errors", async () => {
       global.fetch = async () => { throw new TypeError("offline"); };
       await assert.rejects(getUsers({ page: 1, limit: 10, search: "" }), /offline/);
+    });
+    await check("loads detail by server UUID, includes credentials, and maps permissions", async () => {
+      const id = "10000000-0000-0000-0000-000000000001";
+      let request;
+      global.fetch = async (url, options) => {
+        request = { url: String(url), options };
+        return new Response(JSON.stringify({ success: true, data: { ...user, id, permissions: { can_manage_users: true } } }), { status: 200 });
+      };
+      const result = await getUserById(id);
+      assert.equal(new URL(request.url).pathname, `/api/v1/users/${id}`);
+      assert.equal(request.options.credentials, "include");
+      assert.equal(result.permissions.can_manage_users, true);
+      assert.equal(result.createdAt, user.createdAt);
+    });
+    await check("handles nullable and missing optional detail fields", async () => {
+      const id = "10000000-0000-0000-0000-000000000001";
+      global.fetch = async () => new Response(JSON.stringify({ success: true, data: { id, email: "one@example.test", fullName: "User One", role: "student", avatarUrl: null, createdAt: null, permissions: null } }), { status: 200 });
+      const result = await getUserById(id);
+      assert.equal(result.avatarUrl, undefined);
+      assert.equal(result.createdAt, undefined);
+      assert.equal(result.permissions, undefined);
+    });
+    for (const status of [401, 403, 404]) {
+      await check(`preserves detail HTTP ${status} for the UI`, async () => {
+        global.fetch = async () => new Response(JSON.stringify({ message: "Detail unavailable" }), { status });
+        await assert.rejects(getUserById("10000000-0000-0000-0000-000000000001"), (error) => error instanceof UsersApiError && error.status === status);
+      });
+    }
+    await check("rejects a response for a different user", async () => {
+      global.fetch = async () => new Response(JSON.stringify({ success: true, data: user }), { status: 200 });
+      await assert.rejects(getUserById("10000000-0000-0000-0000-000000000001"), /unexpected format/);
     });
     console.log(`${checks} Admin Users API checks passed`);
   } finally {

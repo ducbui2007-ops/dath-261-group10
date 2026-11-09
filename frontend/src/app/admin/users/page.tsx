@@ -13,7 +13,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getUsers, UsersApiError, type UsersPaginationMeta } from "@/lib/api/users";
+import {
+  getUserById,
+  getUsers,
+  UsersApiError,
+  type UserDetails as UserDetailsData,
+  type UsersPaginationMeta,
+} from "@/lib/api/users";
 import type { User } from "@/types/auth";
 
 const PAGE_SIZE = 10;
@@ -26,21 +32,73 @@ const EMPTY_META: UsersPaginationMeta = {
   hasPreviousPage: false,
 };
 
-function UserDetails({ user, onClose }: { user: User; onClose: () => void }) {
+function UserDetails({ userId, onClose }: { userId: string; onClose: () => void }) {
+  const [user, setUser] = React.useState<UserDetailsData | null>(null);
+  const [error, setError] = React.useState<unknown>(null);
+  const [retry, setRetry] = React.useState(0);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    setUser(null);
+    setError(null);
+    getUserById(userId, controller.signal)
+      .then(setUser)
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setError(reason);
+      });
+    return () => controller.abort();
+  }, [userId, retry]);
+
+  const errorMessage =
+    error instanceof UsersApiError && error.status === 401
+      ? "Your session is missing or expired. Sign in again to view this user."
+      : error instanceof UsersApiError && error.status === 403
+        ? "Your account does not have permission to view this user."
+        : error instanceof UsersApiError && error.status === 404
+          ? "This user no longer exists or could not be found."
+          : error instanceof Error
+            ? error.message
+            : "Could not load user details. Check your connection and try again.";
+
   return (
     <DemoDialog
-      title={user.fullName}
-      description="User information from the server. Role changes and account blocking are not connected."
+      title="User details"
+      description="Details loaded from the server. Role changes and account blocking are not connected."
       onClose={onClose}
     >
-      <Detail label="User ID"><span className="font-mono">{user.id}</span></Detail>
-      <Detail label="Email">{user.email}</Detail>
-      <Detail label="Created">{displayDate(user.createdAt)}</Detail>
-      <Detail label="Avatar">{user.avatarUrl || "Not provided"}</Detail>
-      <Detail label="Current Role"><Badge variant="secondary">{user.role}</Badge></Detail>
-      <p className="text-sm text-muted-foreground">
-        Role changes, account blocking and audit events are unavailable until their APIs are integrated.
-      </p>
+      {!user && !error ? (
+        <p role="status" aria-live="polite" className="py-4 text-sm text-muted-foreground">
+          Loading user details…
+        </p>
+      ) : error ? (
+        <div role="alert" className="space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+          <p className="text-sm">{errorMessage}</p>
+          {error instanceof UsersApiError && error.status === 401 && (
+            <Button asChild variant="outline"><Link href="/login">Sign in</Link></Button>
+          )}
+          <Button variant="outline" onClick={() => setRetry((value) => value + 1)}>
+            Retry
+          </Button>
+        </div>
+      ) : user ? (
+        <div className="space-y-4">
+          <h3 className="break-words text-lg font-semibold">{user.fullName}</h3>
+          <Detail label="User ID"><span className="font-mono">{user.id}</span></Detail>
+          <Detail label="Email">{user.email || "Not provided"}</Detail>
+          <Detail label="Current Role"><Badge variant="secondary">{user.role}</Badge></Detail>
+          <Detail label="Avatar">{user.avatarUrl || "Not provided"}</Detail>
+          <Detail label="Created">{user.createdAt ? displayDate(user.createdAt) : "Not provided"}</Detail>
+          <Detail label="Permissions">
+            {user.permissions && Object.keys(user.permissions).length
+              ? <pre className="overflow-x-auto text-xs">{JSON.stringify(user.permissions, null, 2)}</pre>
+              : "Not provided"}
+          </Detail>
+          <p className="text-sm text-muted-foreground">
+            Role changes, account blocking and audit events are unavailable until their APIs are integrated.
+          </p>
+        </div>
+      ) : null}
     </DemoDialog>
   );
 }
@@ -156,7 +214,7 @@ export default function AdminUsersPage() {
           </p>
         </>
       )}
-      {selected && <UserDetails key={selected.id} user={selected} onClose={() => setSelectedId(null)} />}
+      {selected && <UserDetails key={selected.id} userId={selected.id} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }
